@@ -194,6 +194,10 @@ impl<'b> UiContext<'b> {
         })
     }
 
+    fn max_scroll(&self) -> usize {
+        self.lines.len().saturating_sub(self.terminal_size)
+    }
+
     pub fn redraw(&mut self) -> Result<()> {
         if self.need_redraw {
             queue!(self.output, Clear(ClearType::All), MoveTo(0, 0))?;
@@ -244,20 +248,26 @@ impl<'b> UiContext<'b> {
             self.prompt.clear();
             write!(
                 self.prompt,
-                "{}lines {}/{}{}",
+                "{}lines {}-{}/{}",
                 SetAttribute(Attribute::Reverse),
                 self.scroll + 1,
+                self.scroll + self.terminal_size,
                 self.lines.len(),
-                SetAttribute(Attribute::Reset),
             )
             .ok();
+
+            if self.scroll == self.max_scroll() {
+                self.prompt.push_str(" (END)");
+            }
+
+            write!(self.prompt, "{}", SetAttribute(Attribute::Reset),).ok();
 
             self.prompt_outdated = false;
         }
     }
 
     fn scroll_down(&mut self, idx: usize) {
-        self.scroll = (self.scroll.saturating_add(idx)).min(self.lines.len().saturating_sub(1));
+        self.scroll = (self.scroll.saturating_add(idx)).min(self.max_scroll());
         self.need_redraw = true;
         self.prompt_outdated = true;
     }
