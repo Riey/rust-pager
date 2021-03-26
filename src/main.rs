@@ -270,71 +270,71 @@ impl<'b> UiContext<'b> {
 
     pub fn handle_event(&mut self, event: Event) -> Result<bool> {
         match event {
+            Event::Key(KeyEvent {
+                code: KeyCode::Char('c'),
+                modifiers: KeyModifiers::CONTROL,
+            })
+            | Event::Key(KeyEvent {
+                code: KeyCode::Char('d'),
+                modifiers: KeyModifiers::CONTROL,
+            })
+            | Event::Key(KeyEvent {
+                code: KeyCode::Char('q'),
+                modifiers: KeyModifiers::NONE,
+            }) => {
+                return Ok(true);
+            }
             Event::Mouse(MouseEvent {
                 kind: MouseEventKind::ScrollUp,
                 ..
+            })
+            | Event::Key(KeyEvent {
+                code: KeyCode::Char('k'),
+                modifiers: KeyModifiers::NONE,
             }) => {
                 self.scroll_up(1);
             }
             Event::Mouse(MouseEvent {
                 kind: MouseEventKind::ScrollDown,
                 ..
+            })
+            | Event::Key(KeyEvent {
+                code: KeyCode::Char('j'),
+                modifiers: KeyModifiers::NONE,
             }) => {
                 self.scroll_down(1);
             }
             Event::Key(KeyEvent {
-                code: KeyCode::Char('q'),
-                modifiers,
-            }) if modifiers.is_empty() => {
-                return Ok(true);
-            }
-            Event::Key(KeyEvent {
-                code: KeyCode::Char('k'),
-                modifiers,
-            }) if modifiers.is_empty() => {
-                self.scroll_up(1);
-            }
-            Event::Key(KeyEvent {
-                code: KeyCode::Char('j'),
-                modifiers,
-            }) if modifiers.is_empty() => {
-                self.scroll_down(1);
-            }
-            Event::Key(KeyEvent {
-                code: KeyCode::Char('b'),
-                modifiers,
-            }) if modifiers == KeyModifiers::CONTROL => {
-                self.scroll_up(self.terminal_size);
-            }
-            Event::Key(KeyEvent {
-                code: KeyCode::Char('f'),
-                modifiers,
-            }) if modifiers == KeyModifiers::CONTROL => {
-                self.scroll_down(self.terminal_size);
-            }
-            Event::Key(KeyEvent {
                 code: KeyCode::Char('G'),
-                modifiers,
-            }) if modifiers == KeyModifiers::SHIFT => {
+                modifiers: KeyModifiers::SHIFT,
+            }) => {
                 // G
                 self.scroll_down(usize::MAX);
             }
             Event::Key(KeyEvent {
                 code: KeyCode::Char('g'),
-                modifiers,
-            }) if modifiers.is_empty() => {
+                modifiers: KeyModifiers::NONE,
+            }) => {
                 // g
                 self.scroll_up(usize::MAX);
             }
             Event::Key(KeyEvent {
                 code: KeyCode::PageUp,
                 ..
+            })
+            | Event::Key(KeyEvent {
+                code: KeyCode::Char('b'),
+                modifiers: KeyModifiers::CONTROL,
             }) => {
                 self.scroll_up(self.terminal_size);
             }
             Event::Key(KeyEvent {
                 code: KeyCode::PageDown,
                 ..
+            })
+            | Event::Key(KeyEvent {
+                code: KeyCode::Char('f'),
+                modifiers: KeyModifiers::CONTROL,
             }) => {
                 self.scroll_down(self.terminal_size);
             }
