@@ -418,7 +418,7 @@ impl<'b> Drop for UiContext<'b> {
 fn main() -> Result<()> {
     let args = Args::parse();
     let stdin = get_input(&args)?;
-    let rx = Arc::new(ArrayQueue::new(1024));
+    let rx = Arc::new(ArrayQueue::new(1024 * 16));
     let mut arena = Arena::with_capacity(1024 * 1024);
 
     scope(|s| {
