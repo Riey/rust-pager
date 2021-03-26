@@ -246,7 +246,7 @@ impl<'b> UiContext<'b> {
                 self.prompt,
                 "{}lines {}/{}{}",
                 SetAttribute(Attribute::Reverse),
-                self.scroll,
+                self.scroll + 1,
                 self.lines.len(),
                 SetAttribute(Attribute::Reset),
             )
