@@ -251,7 +251,7 @@ impl<'b> UiContext<'b> {
                 "{}lines {}-{}/{}",
                 SetAttribute(Attribute::Reverse),
                 self.scroll + 1,
-                self.scroll + self.terminal_size,
+                (self.scroll + self.terminal_size).min(self.lines.len()),
                 self.lines.len(),
             )
             .ok();
