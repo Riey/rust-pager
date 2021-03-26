@@ -367,7 +367,7 @@ impl<'b> UiContext<'b> {
         })
         .expect("Set ctrlc handler");
 
-        const BULK_LINE: usize = 100;
+        const BULK_LINE: usize = 5000;
         const FPS: u64 = 30;
         const TICK: Duration = Duration::from_nanos(Duration::from_secs(1).as_nanos() as u64 / FPS);
 
