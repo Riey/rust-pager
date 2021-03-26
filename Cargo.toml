@@ -1,0 +1,23 @@
+[package]
+name = "rust-pager"
+version = "0.1.0"
+authors = ["Riey <creeper844@gmail.com>"]
+edition = "2018"
+license = "GPL-3.0"
+
+[[bin]]
+name = "rp"
+path = "src/main.rs"
+
+[dependencies]
+clap = "3.0.0-beta.2"
+crossbeam-queue = "0.3.1"
+crossbeam-utils = "0.8.3"
+crossterm = "0.19.0"
+ctrlc = { version = "3.1.8", features = ["termination"] }
+libc = "0.2.91"
+memchr = "2.3.4"
+typed-arena = "2.0.1"
+
+[profile.release]
+lto = true
