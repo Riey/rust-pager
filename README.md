@@ -1,11 +1,11 @@
-# cargo-pager
+# rust-pager
 
 Yet another pager in Rust
 
 ## Install
 
 ```sh
-cargo install cargo-pager
+cargo install rust-pager
 ```
 
 ## Usage
