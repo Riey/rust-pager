@@ -2,12 +2,12 @@ use clap::Clap;
 use crossbeam_queue::ArrayQueue;
 use crossbeam_utils::thread::scope;
 use crossterm::{
-    cursor::{Hide, MoveTo, MoveToNextLine, Show},
+    cursor::{Hide, MoveTo, Show},
     event::{
         poll, read, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent,
         KeyModifiers, MouseEvent, MouseEventKind,
     },
-    queue,
+    execute, queue,
     style::{Attribute, SetAttribute},
     terminal::{
         disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
@@ -18,8 +18,7 @@ use crossterm::{
 };
 use std::{
     fs::File,
-    io::ErrorKind,
-    io::{BufWriter, Read, Write},
+    io::{ErrorKind, Write},
     path::PathBuf,
     sync::atomic::AtomicBool,
     sync::Arc,
@@ -30,7 +29,12 @@ use typed_arena::Arena;
 use std::os::unix::prelude::FromRawFd;
 
 #[derive(Clap)]
-#[clap(name = "rp", about = "rust-pager", version = "0.1.0", author = "Riey <creeper844@gmail.com>")]
+#[clap(
+    name = "rp",
+    about = "rust-pager",
+    version = "0.1.0",
+    author = "Riey <creeper844@gmail.com>"
+)]
 struct Args {
     #[clap(about = "Open specific file path")]
     path: Option<PathBuf>,
@@ -105,6 +109,8 @@ fn read_from_stdin<'b>(
     let mut start_len = 0;
 
     loop {
+        use std::io::Read;
+
         let mut buf = match stdin.read(&mut stdin_buf[start_len..]) {
             Ok(l) => &stdin_buf[..start_len + l],
             Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
@@ -163,7 +169,8 @@ fn read_from_stdin<'b>(
 pub struct UiContext<'b> {
     rx: Arc<ArrayQueue<&'b [u8]>>,
     lines: Vec<&'b [u8]>,
-    output: BufWriter<File>,
+    output: File,
+    output_buf: Vec<u8>,
     scroll: usize,
     terminal_size: usize,
     need_redraw: bool,
@@ -175,16 +182,15 @@ impl<'b> UiContext<'b> {
     pub fn new(rx: Arc<ArrayQueue<&'b [u8]>>) -> Result<Self> {
         enable_raw_mode()?;
 
-        let mut output = BufWriter::new(get_output());
+        let mut output = get_output();
 
-        queue!(output, EnterAlternateScreen, EnableMouseCapture, Hide)?;
-
-        output.flush()?;
+        execute!(output, EnterAlternateScreen, EnableMouseCapture, Hide)?;
 
         Ok(Self {
             rx,
             lines: Vec::with_capacity(1024),
             scroll: 0,
+            output_buf: Vec::with_capacity(1024 * 16),
             terminal_size: crossterm::terminal::size()?.1 as usize - 1,
             need_redraw: true,
             prompt_outdated: true,
@@ -199,17 +205,19 @@ impl<'b> UiContext<'b> {
 
     pub fn redraw(&mut self) -> Result<()> {
         if self.need_redraw {
-            queue!(self.output, Clear(ClearType::All), MoveTo(0, 0))?;
+            self.output_buf.clear();
+            queue!(self.output_buf, Clear(ClearType::All), MoveTo(0, 0))?;
 
             let end = (self.scroll + self.terminal_size).min(self.lines.len());
 
             for line in self.lines[self.scroll..end].iter() {
-                self.output.write_all(line)?;
-                queue!(self.output, MoveToNextLine(1))?;
+                self.output_buf.extend_from_slice(line);
+                self.output_buf.extend_from_slice(b"\r\n");
             }
 
             self.update_prompt();
-            self.output.write_all(self.prompt.as_bytes())?;
+            self.output_buf.extend_from_slice(self.prompt.as_bytes());
+            self.output.write_all(&self.output_buf)?;
             self.output.flush()?;
             self.need_redraw = false;
         } else if self.prompt_outdated {
@@ -221,13 +229,17 @@ impl<'b> UiContext<'b> {
     }
 
     fn redraw_prompt(&mut self) -> Result<()> {
+        self.output_buf.clear();
+
         let lines = self.terminal_size;
         queue!(
-            self.output,
+            self.output_buf,
             MoveTo(0, lines as _),
             Clear(ClearType::CurrentLine)
         )?;
-        self.output.write_all(self.prompt.as_bytes())?;
+        self.output_buf.extend_from_slice(self.prompt.as_bytes());
+
+        self.output.write_all(&self.output_buf)?;
         self.output.flush()?;
 
         Ok(())
