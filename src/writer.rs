@@ -24,7 +24,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-type SearchPositionArr = SmallVec<[SearchPosition; 8]>;
+type SearchPositionArr = SmallVec<[SearchPosition; 4]>;
 
 fn get_output() -> File {
     use std::os::unix::prelude::FromRawFd;
