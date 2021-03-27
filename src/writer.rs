@@ -60,6 +60,9 @@ pub enum KeyBehavior {
     GotoEnd,
     GotoTop,
 
+    SearchNext,
+    SearchPrev,
+
     NormalMode,
     Number(u32),
     Search,
@@ -97,6 +100,8 @@ fn default_keymap() -> AHashMap<KeyEvent, KeyBehavior> {
             (KeyCode::Char('q'), KeyBehavior::Quit),
 
             (KeyCode::Char('/'), KeyBehavior::Search),
+            (KeyCode::Char('n'), KeyBehavior::SearchNext),
+
             (KeyCode::Char('0'), KeyBehavior::Number(0)),
             (KeyCode::Char('1'), KeyBehavior::Number(1)),
             (KeyCode::Char('2'), KeyBehavior::Number(2)),
@@ -110,6 +115,7 @@ fn default_keymap() -> AHashMap<KeyEvent, KeyBehavior> {
         ],
         KeyModifiers::SHIFT => [
             (KeyCode::Char('G'), KeyBehavior::GotoEnd),
+            (KeyCode::Char('N'), KeyBehavior::SearchPrev),
         ],
         KeyModifiers::CONTROL => [
             (KeyCode::Char('f'), KeyBehavior::PageDown),
@@ -296,6 +302,31 @@ impl<'b> UiContext<'b> {
         self.goto_scroll(self.scroll.saturating_sub(idx));
     }
 
+    fn move_search(&mut self, forward: bool) {
+        let next = self.search_positions[self.scroll..]
+            .iter()
+            .enumerate()
+            .skip(1)
+            .map(|(i, p)| (i + self.scroll, p));
+
+        let prev = self.search_positions[0..self.scroll].iter().enumerate();
+
+        let line = if forward {
+            next.chain(prev)
+                .filter_map(|(line, p)| if !p.is_empty() { Some(line) } else { None })
+                .next()
+        } else {
+            prev.rev()
+                .chain(next.rev())
+                .filter_map(|(line, p)| if !p.is_empty() { Some(line) } else { None })
+                .next()
+        };
+
+        if let Some(line) = line {
+            self.goto_scroll(line);
+        }
+    }
+
     fn search(&mut self, needle: &str) {
         self.search_positions.clear();
         if needle.is_empty() {
@@ -315,10 +346,7 @@ impl<'b> UiContext<'b> {
                     let start = (prev_pos + pos) as u32;
                     let end = start + needle.len() as u32;
 
-                    v.push(SearchPosition {
-                        start,
-                        end,
-                    });
+                    v.push(SearchPosition { start, end });
 
                     prev_pos = end as usize;
                 }
@@ -381,6 +409,12 @@ impl<'b> UiContext<'b> {
                         KeyBehavior::Search => {
                             self.prompt_state = PromptState::Search(String::new());
                             self.prompt_outdated = true;
+                        }
+                        KeyBehavior::SearchNext => {
+                            self.move_search(true);
+                        }
+                        KeyBehavior::SearchPrev => {
+                            self.move_search(false);
                         }
                         KeyBehavior::Number(n) => match self.prompt_state {
                             PromptState::Number(ref mut pn) => {
