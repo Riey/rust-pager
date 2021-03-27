@@ -1,4 +1,3 @@
-use clap::Clap;
 use crossbeam_queue::ArrayQueue;
 use crossbeam_utils::thread::scope;
 use crossterm::{
@@ -28,16 +27,24 @@ use typed_arena::Arena;
 
 use std::os::unix::prelude::FromRawFd;
 
-#[derive(Clap)]
-#[clap(
-    name = "rp",
-    about = "rust-pager",
-    version = "0.1.0",
-    author = "Riey <creeper844@gmail.com>"
-)]
 struct Args {
-    #[clap(about = "Open specific file path")]
     path: Option<PathBuf>,
+}
+
+impl Args {
+    pub fn parse() -> Option<Self> {
+        let mut args = pico_args::Arguments::from_env();
+
+        if args.contains(["-h", "--help"]) {
+            println!("rp 0.1.0");
+            println!("USAGE: `<command> | rp` or `rp <path>`");
+            return None;
+        }
+
+        Some(Self {
+            path: args.free_from_str().ok(),
+        })
+    }
 }
 
 fn get_input(args: &Args) -> Result<File> {
@@ -427,12 +434,21 @@ impl<'b> Drop for UiContext<'b> {
 }
 
 fn main() -> Result<()> {
-    #[cfg(feature = "logging")] {
+    #[cfg(feature = "logging")]
+    {
         use simplelog::*;
-        WriteLogger::init(LevelFilter::Trace, ConfigBuilder::new().build(), File::create("rp.log")?).unwrap();
+        WriteLogger::init(
+            LevelFilter::Trace,
+            ConfigBuilder::new().build(),
+            File::create("rp.log")?,
+        )
+        .unwrap();
     }
 
-    let args = Args::parse();
+    let args = match Args::parse() {
+        Some(args) => args,
+        None => return Ok(()),
+    };
     let stdin = get_input(&args)?;
     let rx = Arc::new(ArrayQueue::new(1024 * 16));
     let mut arena = Arena::with_capacity(1024 * 1024);
