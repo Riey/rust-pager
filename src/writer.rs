@@ -33,7 +33,6 @@ fn get_output() -> File {
 
 #[derive(Clone, Copy)]
 pub struct SearchPosition {
-    line: usize,
     start: u32,
     end: u32,
 }
@@ -302,14 +301,12 @@ impl<'b> UiContext<'b> {
 
         self.lines
             .par_iter()
-            .enumerate()
-            .map(|(line, bytes)| {
+            .map(|bytes| {
                 let mut v = SearchPositionArr::new();
                 let mut prev_pos = 0;
 
                 while let Some(pos) = twoway::find_bytes(&bytes[prev_pos..], needle) {
                     v.push(SearchPosition {
-                        line,
                         start: pos as u32,
                         end: (pos + needle.len()) as u32,
                     });
