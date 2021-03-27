@@ -1,4 +1,3 @@
-//
 use clap::Clap;
 use crossbeam_queue::ArrayQueue;
 use crossbeam_utils::thread::scope;
@@ -8,7 +7,7 @@ use crossterm::{
         poll, read, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent,
         KeyModifiers, MouseEvent, MouseEventKind,
     },
-    execute, queue,
+    queue,
     style::{Attribute, SetAttribute},
     terminal::{
         disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
@@ -20,22 +19,20 @@ use crossterm::{
 use std::{
     fs::File,
     io::ErrorKind,
+    io::{BufWriter, Read, Write},
     path::PathBuf,
+    sync::atomic::AtomicBool,
     sync::Arc,
     time::{Duration, Instant},
-};
-use std::{
-    io::{BufWriter, Read, Write},
-    sync::atomic::AtomicBool,
 };
 use typed_arena::Arena;
 
 use std::os::unix::prelude::FromRawFd;
 
 #[derive(Clap)]
-#[clap(name = "rp")]
+#[clap(name = "rp", about = "rust-pager", version = "0.1.0", author = "Riey <creeper844@gmail.com>")]
 struct Args {
-    #[clap()]
+    #[clap(about = "Open specific file path")]
     path: Option<PathBuf>,
 }
 
@@ -152,6 +149,8 @@ fn read_from_stdin<'b>(
         let end_len = buf.len();
 
         if start_len == end_len {
+            // send incomplete single line
+            push_no_newline(arena, &tx, &buf[..128]);
             // too many bytes
             break Ok(());
         }
@@ -378,16 +377,20 @@ impl<'b> UiContext<'b> {
                 return Ok(());
             }
 
+            // non blocking
             while poll(Duration::from_nanos(0))? {
                 let e = read()?;
 
                 if self.handle_event(e)? {
                     return Ok(());
                 }
+
+                self.redraw()?;
             }
 
             let mut line_count = 0;
 
+            // receive lines max BULK_LINE
             while let Some(line) = self.rx.pop() {
                 if line_count >= BULK_LINE {
                     break;
@@ -410,7 +413,8 @@ impl<'b> UiContext<'b> {
 
 impl<'b> Drop for UiContext<'b> {
     fn drop(&mut self) {
-        execute!(self.output, Show, DisableMouseCapture, LeaveAlternateScreen).ok();
+        queue!(self.output, Show, DisableMouseCapture, LeaveAlternateScreen).ok();
+        self.output.flush().ok();
         disable_raw_mode().ok();
     }
 }
