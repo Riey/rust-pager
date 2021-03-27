@@ -510,11 +510,11 @@ impl<'b> UiContext<'b> {
             while let Some(line) = self.rx.pop() {
                 self.push_line(line);
 
+                line_count += 1;
+
                 if line_count >= BULK_LINE {
                     break;
                 }
-
-                line_count += 1;
             }
 
             self.redraw()?;
