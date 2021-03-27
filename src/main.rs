@@ -117,22 +117,14 @@ fn read_from_stdin<'b>(
             Err(e) => return Err(From::from(e)),
         };
 
+        #[cfg(feature = "logging")]
+        log::debug!("Read {} bytes", buf.len() - start_len);
+
         if start_len == buf.len() {
-            // EOF
-            loop {
-                match memchr::memchr(b'\n', buf) {
-                    Some(pos) => {
-                        let (line, new_buf) = buf.split_at(pos + 1);
-                        buf = new_buf;
-                        push_newline(arena, &tx, line);
-                    }
-                    None => {
-                        if !buf.is_empty() {
-                            push_no_newline(arena, &tx, buf);
-                        }
-                        break;
-                    }
-                }
+            #[cfg(feature = "logging")]
+            log::info!("EOF");
+            if !buf.is_empty() {
+                push_no_newline(arena, &tx, buf);
             }
             break Ok(());
         }
@@ -154,15 +146,18 @@ fn read_from_stdin<'b>(
 
         let end_len = buf.len();
 
-        if start_len == end_len {
+        if stdin_buf.len() == end_len {
+            #[cfg(feature = "logging")]
+            log::info!("Too many bytes");
             // send incomplete single line
-            push_no_newline(arena, &tx, &buf[..128]);
-            // too many bytes
+            push_no_newline(arena, &tx, &buf);
             break Ok(());
+        } else if start_len == end_len {
+            // no bytes processed
+        } else {
+            stdin_buf.copy_within((start_len - end_len)..start_len, 0);
+            start_len = end_len;
         }
-
-        stdin_buf.copy_within((start_len - end_len)..start_len, 0);
-        start_len = end_len;
     }
 }
 
@@ -425,13 +420,17 @@ impl<'b> UiContext<'b> {
 
 impl<'b> Drop for UiContext<'b> {
     fn drop(&mut self) {
-        queue!(self.output, Show, DisableMouseCapture, LeaveAlternateScreen).ok();
-        self.output.flush().ok();
+        execute!(self.output, Show, DisableMouseCapture, LeaveAlternateScreen).ok();
         disable_raw_mode().ok();
     }
 }
 
 fn main() -> Result<()> {
+    #[cfg(feature = "logging")] {
+        use simplelog::*;
+        WriteLogger::init(LevelFilter::Trace, ConfigBuilder::new().build(), File::create("rp.log")?).unwrap();
+    }
+
     let args = Args::parse();
     let stdin = get_input(&args)?;
     let rx = Arc::new(ArrayQueue::new(1024 * 16));
