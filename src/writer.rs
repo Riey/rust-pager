@@ -168,6 +168,9 @@ impl<'b> UiContext<'b> {
 
     pub fn redraw(&mut self) -> Result<()> {
         if self.need_redraw {
+            #[cfg(feature = "logging")]
+            log::debug!("REDRAW");
+
             self.output_buf.clear();
             queue!(self.output_buf, Clear(ClearType::All), MoveTo(0, 0))?;
 
@@ -181,7 +184,7 @@ impl<'b> UiContext<'b> {
             } else {
                 for (line, search) in self.lines[self.scroll..end]
                     .iter()
-                    .zip(self.search_positions.iter())
+                    .zip(self.search_positions[self.scroll..end].iter())
                 {
                     let mut prev_pos = 0;
                     for pos in search.iter() {
@@ -293,11 +296,14 @@ impl<'b> UiContext<'b> {
         self.goto_scroll(self.scroll.saturating_sub(idx));
     }
 
-    fn search(&mut self, needle: &[u8]) {
+    fn search(&mut self, needle: &str) {
         self.search_positions.clear();
         if needle.is_empty() {
             return;
         }
+
+        #[cfg(feature = "logging")]
+        log::debug!("Search: {:?}", needle);
 
         self.lines
             .par_iter()
@@ -305,7 +311,7 @@ impl<'b> UiContext<'b> {
                 let mut v = SearchPositionArr::new();
                 let mut prev_pos = 0;
 
-                while let Some(pos) = twoway::find_bytes(&bytes[prev_pos..], needle) {
+                while let Some(pos) = twoway::find_bytes(&bytes[prev_pos..], needle.as_bytes()) {
                     v.push(SearchPosition {
                         start: pos as u32,
                         end: (pos + needle.len()) as u32,
@@ -351,7 +357,7 @@ impl<'b> UiContext<'b> {
                             }
                             KeyCode::Enter => {
                                 let needle = std::mem::take(s);
-                                self.search(needle.as_bytes());
+                                self.search(&needle);
                                 self.prompt_state = PromptState::Normal;
                                 self.prompt_outdated = true;
                                 self.need_redraw = true;

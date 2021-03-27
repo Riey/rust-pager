@@ -4,7 +4,7 @@ mod writer;
 use bumpalo::Bump;
 use crossbeam_queue::ArrayQueue;
 use crossbeam_utils::thread::scope;
-use crossterm::{Result, tty::IsTty};
+use crossterm::{tty::IsTty, Result};
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
