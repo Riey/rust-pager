@@ -2,6 +2,12 @@
 
 Yet another pager in Rust
 
+## Features
+
+* Vim like keybindings
+* Search substring
+* Mouse wheel support
+
 ## Install
 
 ```sh
