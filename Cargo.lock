@@ -24,6 +24,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf1de2fe8c75bc145a2f577add951f8134889b4795d47466a54a5c846d691693"
 
 [[package]]
+name = "bumpalo"
+version = "3.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63396b8a4b9de3f4fdfb320ab6080762242f66a8ef174c49d8e19b674db4cdbe"
+
+[[package]]
 name = "cc"
 version = "1.0.67"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -273,6 +279,7 @@ name = "rust-pager"
 version = "0.1.0"
 dependencies = [
  "ahash",
+ "bumpalo",
  "crossbeam-queue",
  "crossbeam-utils",
  "crossterm",
@@ -282,7 +289,6 @@ dependencies = [
  "memchr",
  "pico-args",
  "simplelog",
- "typed-arena",
 ]
 
 [[package]]
@@ -347,12 +353,6 @@ dependencies = [
  "wasi",
  "winapi",
 ]
-
-[[package]]
-name = "typed-arena"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0685c84d5d54d1c26f7d3eb96cd41550adb97baed141a761cf335d3d33bcd0ae"
 
 [[package]]
 name = "version_check"

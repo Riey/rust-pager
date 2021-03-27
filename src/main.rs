@@ -24,7 +24,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use typed_arena::Arena;
+use bumpalo::Bump;
 
 use std::os::unix::prelude::FromRawFd;
 
@@ -63,46 +63,9 @@ fn get_output() -> File {
     unsafe { File::from_raw_fd(libc::STDOUT_FILENO) }
 }
 
-fn alloc_slice<'b>(arena: &'b Arena<u8>, slice: &[u8]) -> &'b [u8] {
-    unsafe {
-        let uninit_line = arena.alloc_uninitialized(slice.len());
-        std::ptr::copy_nonoverlapping(
-            slice.as_ptr(),
-            uninit_line.as_mut_ptr() as *mut u8,
-            slice.len(),
-        );
-        std::mem::transmute(uninit_line)
-    }
-}
-
-fn alloc_slice_sub1<'b>(arena: &'b Arena<u8>, slice: &[u8]) -> &'b [u8] {
-    unsafe {
-        match slice.len().checked_sub(1) {
-            Some(len) => {
-                let uninit_line = arena.alloc_uninitialized(len);
-                std::ptr::copy_nonoverlapping(
-                    slice.as_ptr(),
-                    uninit_line.as_mut_ptr() as *mut u8,
-                    len,
-                );
-                std::mem::transmute(uninit_line)
-            }
-            None => &[],
-        }
-    }
-}
-
-fn push_newline<'b>(arena: &'b Arena<u8>, tx: &ArrayQueue<&'b [u8]>, line: &[u8]) {
-    let line = alloc_slice_sub1(arena, line);
-
-    while tx.push(line).is_err() {
-        std::thread::sleep(Duration::from_millis(50));
-    }
-}
-
-fn push_no_newline<'b>(arena: &'b Arena<u8>, tx: &ArrayQueue<&'b [u8]>, line: &[u8]) {
-    let line = alloc_slice(arena, line);
-
+fn push_newline<'b>(b: &'b Bump, tx: &ArrayQueue<&'b [u8]>, line: &[u8]) {
+    let line = b.alloc_slice_copy(line);
+    
     while tx.push(line).is_err() {
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -110,7 +73,7 @@ fn push_no_newline<'b>(arena: &'b Arena<u8>, tx: &ArrayQueue<&'b [u8]>, line: &[
 
 fn read_from_stdin<'b>(
     mut stdin: File,
-    arena: &'b mut Arena<u8>,
+    b: &'b mut Bump,
     tx: Arc<ArrayQueue<&'b [u8]>>,
 ) -> Result<()> {
     let mut stdin_buf = [0; 8196];
@@ -132,7 +95,7 @@ fn read_from_stdin<'b>(
             #[cfg(feature = "logging")]
             log::info!("EOF");
             if !buf.is_empty() {
-                push_no_newline(arena, &tx, buf);
+                push_newline(b, &tx, buf);
             }
             break Ok(());
         }
@@ -142,9 +105,9 @@ fn read_from_stdin<'b>(
         loop {
             match memchr::memchr(b'\n', buf) {
                 Some(pos) => {
-                    let (line, new_buf) = buf.split_at(pos + 1);
-                    buf = new_buf;
-                    push_newline(arena, &tx, line);
+                    let (line, new_buf) = buf.split_at(pos);
+                    buf = new_buf.split_first().expect("Must success").1;
+                    push_newline(b, &tx, line);
                 }
                 None => {
                     break;
@@ -158,7 +121,7 @@ fn read_from_stdin<'b>(
             #[cfg(feature = "logging")]
             log::info!("Too many bytes");
             // send incomplete single line
-            push_no_newline(arena, &tx, &buf);
+            push_newline(b, &tx, &buf);
             break Ok(());
         } else if start_len == end_len {
             // no bytes processed
@@ -553,13 +516,13 @@ fn main() -> Result<()> {
     };
     let stdin = get_input(&args)?;
     let rx = Arc::new(ArrayQueue::new(1024 * 16));
-    let mut arena = Arena::with_capacity(1024 * 1024);
+    let mut b = Bump::with_capacity(1024 * 1024);
 
     scope(|s| {
         let tx = rx.clone();
         s.builder()
             .name("stdin".into())
-            .spawn(|_| read_from_stdin(stdin, &mut arena, tx))?;
+            .spawn(|_| read_from_stdin(stdin, &mut b, tx))?;
 
         UiContext::new(rx)?.run()?;
 

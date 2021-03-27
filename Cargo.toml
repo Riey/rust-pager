@@ -14,6 +14,7 @@ logging = ["simplelog", "log"]
 
 [dependencies]
 ahash = "0.7.2"
+bumpalo = "3.6.1"
 crossbeam-queue = "0.3.1"
 crossbeam-utils = "0.8.3"
 crossterm = "0.19.0"
@@ -23,7 +24,6 @@ log = { version = "0.4.14", optional = true }
 memchr = "2.3.4"
 pico-args = "0.4.0"
 simplelog = { version = "0.9.0", optional = true }
-typed-arena = "2.0.1"
 
 [profile.release]
 lto = true
