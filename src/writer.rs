@@ -312,11 +312,15 @@ impl<'b> UiContext<'b> {
                 let mut prev_pos = 0;
 
                 while let Some(pos) = twoway::find_bytes(&bytes[prev_pos..], needle.as_bytes()) {
+                    let start = (prev_pos + pos) as u32;
+                    let end = start + needle.len() as u32;
+
                     v.push(SearchPosition {
-                        start: pos as u32,
-                        end: (pos + needle.len()) as u32,
+                        start,
+                        end,
                     });
-                    prev_pos = pos + needle.len();
+
+                    prev_pos = end as usize;
                 }
 
                 v
