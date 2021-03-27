@@ -383,7 +383,8 @@ dependencies = [
  "pico-args",
  "rayon",
  "simplelog",
- "sliceslice",
+ "smallvec",
+ "twoway",
 ]
 
 [[package]]
@@ -424,15 +425,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sliceslice"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "114324ef2c4c8cf011c7bf215bb7e1df6554b38289e2297db94da88b28f7a6da"
-dependencies = [
- "memchr",
-]
-
-[[package]]
 name = "smallvec"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -457,6 +449,22 @@ dependencies = [
  "wasi",
  "winapi",
 ]
+
+[[package]]
+name = "twoway"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b40075910de3a912adbd80b5d8bad6ad10a23eeb1f5bf9d4006839e899ba5bc"
+dependencies = [
+ "memchr",
+ "unchecked-index",
+]
+
+[[package]]
+name = "unchecked-index"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eeba86d422ce181a719445e51872fa30f1f7413b62becb52e95ec91aa262d85c"
 
 [[package]]
 name = "version_check"

@@ -14,7 +14,8 @@ use crossterm::{
     },
     Result,
 };
-use sliceslice::x86::DynamicAvx2Searcher;
+use rayon::prelude::*;
+use smallvec::SmallVec;
 use std::{
     fs::File,
     io::Write,
@@ -23,15 +24,18 @@ use std::{
     time::{Duration, Instant},
 };
 
+type SearchPositionArr = SmallVec<[SearchPosition; 8]>;
+
 fn get_output() -> File {
     use std::os::unix::prelude::FromRawFd;
     unsafe { File::from_raw_fd(libc::STDOUT_FILENO) }
 }
 
+#[derive(Clone, Copy)]
 pub struct SearchPosition {
     line: usize,
-    start: usize,
-    end: usize,
+    start: u32,
+    end: u32,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -123,7 +127,7 @@ fn default_keymap() -> AHashMap<KeyEvent, KeyBehavior> {
 pub struct UiContext<'b> {
     rx: Arc<ArrayQueue<&'b [u8]>>,
     lines: Vec<&'b [u8]>,
-    search_positions: Vec<SearchPosition>,
+    search_positions: Vec<SearchPositionArr>,
     output: File,
     output_buf: Vec<u8>,
     scroll: usize,
@@ -170,9 +174,30 @@ impl<'b> UiContext<'b> {
 
             let end = (self.scroll + self.terminal_size).min(self.lines.len());
 
-            for line in self.lines[self.scroll..end].iter() {
-                self.output_buf.extend_from_slice(line);
-                self.output_buf.extend_from_slice(b"\r\n");
+            if self.search_positions.is_empty() {
+                for line in self.lines[self.scroll..end].iter() {
+                    self.output_buf.extend_from_slice(line);
+                    self.output_buf.extend_from_slice(b"\r\n");
+                }
+            } else {
+                for (line, search) in self.lines[self.scroll..end]
+                    .iter()
+                    .zip(self.search_positions.iter())
+                {
+                    let mut prev_pos = 0;
+                    for pos in search.iter() {
+                        self.output_buf
+                            .extend_from_slice(&line[prev_pos as usize..pos.start as usize]);
+                        queue!(self.output_buf, SetAttribute(Attribute::Reverse))?;
+                        self.output_buf
+                            .extend_from_slice(&line[pos.start as usize..pos.end as usize]);
+                        queue!(self.output_buf, SetAttribute(Attribute::Reset))?;
+                        prev_pos = pos.end;
+                    }
+                    self.output_buf
+                        .extend_from_slice(&line[prev_pos as usize..]);
+                    self.output_buf.extend_from_slice(b"\r\n");
+                }
             }
 
             self.update_prompt();
@@ -269,11 +294,31 @@ impl<'b> UiContext<'b> {
         self.goto_scroll(self.scroll.saturating_sub(idx));
     }
 
-    fn search(&mut self, text: &str) {
-        let searcher = unsafe { DynamicAvx2Searcher::new(text.as_bytes().to_owned().into_boxed_slice()) };
-
-        for (y, line) in self.lines.iter().enumerate() {
+    fn search(&mut self, needle: &[u8]) {
+        self.search_positions.clear();
+        if needle.is_empty() {
+            return;
         }
+
+        self.lines
+            .par_iter()
+            .enumerate()
+            .map(|(line, bytes)| {
+                let mut v = SearchPositionArr::new();
+                let mut prev_pos = 0;
+
+                while let Some(pos) = twoway::find_bytes(&bytes[prev_pos..], needle) {
+                    v.push(SearchPosition {
+                        line,
+                        start: pos as u32,
+                        end: (pos + needle.len()) as u32,
+                    });
+                    prev_pos = pos + needle.len();
+                }
+
+                v
+            })
+            .collect_into_vec(&mut self.search_positions);
     }
 
     pub fn handle_event(&mut self, event: Event) -> Result<bool> {
@@ -295,16 +340,27 @@ impl<'b> UiContext<'b> {
                 }
             }
             Event::Key(ke) => {
-                if !ke
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-                {
-                    if let KeyCode::Char(c) = ke.code {
-                        if let PromptState::Search(ref mut s) = self.prompt_state {
-                            s.push(c);
-                            self.prompt_outdated = true;
-                            self.need_redraw = true;
-                            return Ok(false);
+                if let PromptState::Search(ref mut s) = self.prompt_state {
+                    if !ke
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                    {
+                        match ke.code {
+                            KeyCode::Char(c) => {
+                                s.push(c);
+                                self.prompt_outdated = true;
+                                self.need_redraw = true;
+                                return Ok(false);
+                            }
+                            KeyCode::Enter => {
+                                let needle = std::mem::take(s);
+                                self.search(needle.as_bytes());
+                                self.prompt_state = PromptState::Normal;
+                                self.prompt_outdated = true;
+                                self.need_redraw = true;
+                                return Ok(false);
+                            }
+                            _ => {}
                         }
                     }
                 }
