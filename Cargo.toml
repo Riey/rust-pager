@@ -13,6 +13,7 @@ path = "src/main.rs"
 logging = ["simplelog", "log"]
 
 [dependencies]
+ahash = "0.7.2"
 crossbeam-queue = "0.3.1"
 crossbeam-utils = "0.8.3"
 crossterm = "0.19.0"

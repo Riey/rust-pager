@@ -1,3 +1,4 @@
+use ahash::AHashMap;
 use crossbeam_queue::ArrayQueue;
 use crossbeam_utils::thread::scope;
 use crossterm::{
@@ -168,6 +169,74 @@ fn read_from_stdin<'b>(
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PromptState {
+    Normal,
+    Number(usize),
+}
+
+impl PromptState {
+    pub fn take(&mut self) -> Self {
+        std::mem::replace(self, Self::Normal)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum KeyBehavior {
+    Quit,
+    Down,
+    Up,
+    PageDown,
+    PageUp,
+    GotoEnd,
+    GotoTop,
+}
+
+fn default_keymap() -> AHashMap<KeyEvent, KeyBehavior> {
+    let mut dict = AHashMap::new();
+
+    macro_rules! keymap {
+        ($($modifier:expr => [$(($code:expr, $behavior:expr),)*],)*) => {
+            $(
+                $(
+                    dict.insert(KeyEvent::new($code, $modifier), $behavior);
+                )*
+            )*
+        }
+    }
+
+    keymap! {
+        KeyModifiers::NONE => [
+            (KeyCode::Enter, KeyBehavior::Down),
+            (KeyCode::Down, KeyBehavior::Down),
+            (KeyCode::Char('j'), KeyBehavior::Down),
+
+            (KeyCode::Up, KeyBehavior::Up),
+            (KeyCode::Char('k'), KeyBehavior::Up),
+
+            (KeyCode::PageDown, KeyBehavior::PageDown),
+
+            (KeyCode::Home, KeyBehavior::GotoTop),
+            (KeyCode::End, KeyBehavior::GotoEnd),
+            (KeyCode::Char('g'), KeyBehavior::GotoTop),
+
+            (KeyCode::Char('q'), KeyBehavior::Quit),
+        ],
+        KeyModifiers::SHIFT => [
+            (KeyCode::Char('G'), KeyBehavior::GotoEnd),
+        ],
+        KeyModifiers::CONTROL => [
+            (KeyCode::Char('f'), KeyBehavior::PageDown),
+            (KeyCode::Char('b'), KeyBehavior::PageUp),
+
+            (KeyCode::Char('d'), KeyBehavior::Quit),
+            (KeyCode::Char('c'), KeyBehavior::Quit),
+        ],
+    }
+
+    dict
+}
+
 pub struct UiContext<'b> {
     rx: Arc<ArrayQueue<&'b [u8]>>,
     lines: Vec<&'b [u8]>,
@@ -175,8 +244,10 @@ pub struct UiContext<'b> {
     output_buf: Vec<u8>,
     scroll: usize,
     terminal_size: usize,
+    keymap: AHashMap<KeyEvent, KeyBehavior>,
     need_redraw: bool,
     prompt_outdated: bool,
+    prompt_state: PromptState,
     prompt: String,
 }
 
@@ -194,7 +265,9 @@ impl<'b> UiContext<'b> {
             scroll: 0,
             output_buf: Vec::with_capacity(1024 * 16),
             terminal_size: crossterm::terminal::size()?.1 as usize - 1,
+            keymap: default_keymap(),
             need_redraw: true,
+            prompt_state: PromptState::Normal,
             prompt_outdated: true,
             prompt: String::with_capacity(256),
             output,
@@ -259,108 +332,137 @@ impl<'b> UiContext<'b> {
         if self.prompt_outdated {
             use std::fmt::Write;
             self.prompt.clear();
-            write!(
-                self.prompt,
-                "{}lines {}-{}/{}",
-                SetAttribute(Attribute::Reverse),
-                self.scroll + 1,
-                (self.scroll + self.terminal_size).min(self.lines.len()),
-                self.lines.len(),
-            )
-            .ok();
 
-            if self.scroll == self.max_scroll() {
-                self.prompt.push_str(" (END)");
+            match self.prompt_state {
+                PromptState::Normal => {
+                    write!(
+                        self.prompt,
+                        "{}lines {}-{}/{}",
+                        SetAttribute(Attribute::Reverse),
+                        self.scroll + 1,
+                        (self.scroll + self.terminal_size).min(self.lines.len()),
+                        self.lines.len(),
+                    )
+                    .ok();
+
+                    if self.scroll == self.max_scroll() {
+                        self.prompt.push_str(" (END)");
+                    }
+
+                    write!(self.prompt, "{}", SetAttribute(Attribute::Reset),).ok();
+                }
+                PromptState::Number(n) => {
+                    write!(self.prompt, ":{}", n).ok();
+                }
             }
-
-            write!(self.prompt, "{}", SetAttribute(Attribute::Reset),).ok();
 
             self.prompt_outdated = false;
         }
     }
 
-    fn scroll_down(&mut self, idx: usize) {
-        self.scroll = (self.scroll.saturating_add(idx)).min(self.max_scroll());
+    fn goto_scroll(&mut self, idx: usize) {
+        self.scroll = idx.min(self.max_scroll());
         self.need_redraw = true;
         self.prompt_outdated = true;
     }
 
+    fn scroll_down(&mut self, idx: usize) {
+        self.goto_scroll(self.scroll.saturating_add(idx));
+    }
+
     fn scroll_up(&mut self, idx: usize) {
-        self.scroll = self.scroll.saturating_sub(idx);
-        self.need_redraw = true;
-        self.prompt_outdated = true;
+        self.goto_scroll(self.scroll.saturating_sub(idx));
     }
 
     pub fn handle_event(&mut self, event: Event) -> Result<bool> {
         match event {
-            Event::Key(KeyEvent {
-                code: KeyCode::Char('c'),
-                modifiers: KeyModifiers::CONTROL,
-            })
-            | Event::Key(KeyEvent {
-                code: KeyCode::Char('d'),
-                modifiers: KeyModifiers::CONTROL,
-            })
-            | Event::Key(KeyEvent {
-                code: KeyCode::Char('q'),
-                modifiers: KeyModifiers::NONE,
-            }) => {
-                return Ok(true);
-            }
             Event::Mouse(MouseEvent {
                 kind: MouseEventKind::ScrollUp,
                 ..
-            })
-            | Event::Key(KeyEvent {
-                code: KeyCode::Char('k'),
-                modifiers: KeyModifiers::NONE,
             }) => {
-                self.scroll_up(1);
+                if self.prompt_state == PromptState::Normal {
+                    self.scroll_up(1);
+                }
             }
             Event::Mouse(MouseEvent {
                 kind: MouseEventKind::ScrollDown,
                 ..
-            })
-            | Event::Key(KeyEvent {
-                code: KeyCode::Char('j'),
-                modifiers: KeyModifiers::NONE,
             }) => {
-                self.scroll_down(1);
+                if self.prompt_state == PromptState::Normal {
+                    self.scroll_down(1);
+                }
             }
-            Event::Key(KeyEvent {
-                code: KeyCode::Char('G'),
-                modifiers: KeyModifiers::SHIFT,
-            }) => {
-                // G
-                self.scroll_down(usize::MAX);
-            }
-            Event::Key(KeyEvent {
-                code: KeyCode::Char('g'),
-                modifiers: KeyModifiers::NONE,
-            }) => {
-                // g
-                self.scroll_up(usize::MAX);
-            }
-            Event::Key(KeyEvent {
-                code: KeyCode::PageUp,
-                ..
-            })
-            | Event::Key(KeyEvent {
-                code: KeyCode::Char('b'),
-                modifiers: KeyModifiers::CONTROL,
-            }) => {
-                self.scroll_up(self.terminal_size);
-            }
-            Event::Key(KeyEvent {
-                code: KeyCode::PageDown,
-                ..
-            })
-            | Event::Key(KeyEvent {
-                code: KeyCode::Char('f'),
-                modifiers: KeyModifiers::CONTROL,
-            }) => {
-                self.scroll_down(self.terminal_size);
-            }
+            Event::Key(ke) => match self.keymap.get(&ke) {
+                Some(b) => match b {
+                    KeyBehavior::Up => match self.prompt_state.take() {
+                        PromptState::Normal => {
+                            self.scroll_up(1);
+                        }
+                        PromptState::Number(n) => {
+                            self.scroll_up(n);
+                        }
+                    },
+                    KeyBehavior::Down => match self.prompt_state.take() {
+                        PromptState::Normal => {
+                            self.scroll_down(1);
+                        }
+                        PromptState::Number(n) => {
+                            self.scroll_down(n);
+                        }
+                    },
+                    KeyBehavior::PageDown => match self.prompt_state.take() {
+                        PromptState::Normal => {
+                            self.scroll_down(self.terminal_size);
+                        }
+                        PromptState::Number(n) => {
+                            self.scroll_down(self.terminal_size.saturating_mul(n));
+                        }
+                    },
+                    KeyBehavior::PageUp => match self.prompt_state.take() {
+                        PromptState::Normal => {
+                            self.scroll_up(self.terminal_size);
+                        }
+                        PromptState::Number(n) => {
+                            self.scroll_up(self.terminal_size.saturating_mul(n));
+                        }
+                    },
+                    KeyBehavior::GotoTop => match self.prompt_state.take() {
+                        PromptState::Normal => {
+                            self.scroll_up(usize::MAX);
+                        }
+                        PromptState::Number(n) => {
+                            self.goto_scroll(n.saturating_sub(1));
+                        }
+                    },
+                    KeyBehavior::GotoEnd => match self.prompt_state.take() {
+                        PromptState::Normal => {
+                            self.scroll_down(usize::MAX);
+                        }
+                        PromptState::Number(n) => {
+                            self.goto_scroll(n.saturating_sub(1));
+                        }
+                    },
+                    KeyBehavior::Quit => {
+                        return Ok(true);
+                    }
+                },
+                None => {
+                    if ke.modifiers.is_empty() {
+                        if let KeyCode::Char(c @ '0'..='9') = ke.code {
+                            let n = (c as u32 - '0' as u32) as usize;
+                            match self.prompt_state {
+                                PromptState::Normal => {
+                                    self.prompt_state = PromptState::Number(n);
+                                }
+                                PromptState::Number(ref mut pn) => {
+                                    *pn = *pn * 10 + n;
+                                }
+                            }
+                            self.prompt_outdated = true;
+                        }
+                    }
+                }
+            },
             Event::Resize(_x, y) => {
                 self.terminal_size = y as usize - 1;
                 self.need_redraw = true;
