@@ -399,11 +399,12 @@ impl<'b> UiContext<'b> {
 
             // receive lines max BULK_LINE
             while let Some(line) = self.rx.pop() {
+                self.push_line(line);
+
                 if line_count >= BULK_LINE {
                     break;
                 }
 
-                self.push_line(line);
                 line_count += 1;
             }
 
