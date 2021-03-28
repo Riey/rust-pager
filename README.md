@@ -25,3 +25,7 @@ or
 ```sh
 rp <path>
 ```
+
+## Screenshot
+
+![Screenshot](./screenshot.png)
