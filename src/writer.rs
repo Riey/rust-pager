@@ -400,6 +400,18 @@ impl<'b> UiContext<'b> {
                                 self.need_redraw = true;
                                 return Ok(false);
                             }
+                            KeyCode::Backspace => {
+                                let s_len = s.chars().count();
+                                if s_len == 0 {
+                                    self.prompt_state = PromptState::Normal; // Cancel the search.
+                                } else {
+                                    s.pop();
+                                }
+
+                                self.prompt_outdated = true;
+                                self.need_redraw = true;
+                                return Ok(false);
+                            }
                             KeyCode::Enter => {
                                 let needle = std::mem::take(s);
                                 self.search(&needle);
