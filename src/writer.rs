@@ -156,7 +156,7 @@ impl<'b> UiContext<'b> {
             rx,
             lines: Vec::with_capacity(1024),
             scroll: 0,
-            output_buf: Vec::with_capacity(1024 * 16),
+            output_buf: Vec::with_capacity(1024 * 1024),
             search_positions: Vec::new(),
             terminal_size: crossterm::terminal::size()?.1 as usize - 1,
             keymap: default_keymap(),
