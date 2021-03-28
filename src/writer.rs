@@ -429,6 +429,7 @@ impl<'b> UiContext<'b> {
                     Some(b) => match b {
                         KeyBehavior::NormalMode => {
                             self.prompt_state.take();
+                            self.search("");
                             self.prompt_outdated = true;
                         }
                         KeyBehavior::Search => {
