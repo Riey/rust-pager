@@ -374,6 +374,8 @@ impl<'b> UiContext<'b> {
                 v
             })
             .collect_into_vec(&mut self.search_positions);
+
+        self.move_search(true);
     }
 
     pub fn handle_event(&mut self, event: Event) -> Result<bool> {
