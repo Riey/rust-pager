@@ -544,8 +544,6 @@ impl<'b> UiContext<'b> {
                 if self.handle_event(e)? {
                     return Ok(());
                 }
-
-                self.redraw()?;
             }
 
             let mut line_count = 0;
