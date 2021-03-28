@@ -34,7 +34,6 @@ fn get_output() -> File {
 #[derive(Clone, Copy)]
 pub struct SearchPosition {
     start: u32,
-    end: u32,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -138,6 +137,7 @@ pub struct UiContext<'b> {
     scroll: usize,
     terminal_size: usize,
     keymap: AHashMap<KeyEvent, KeyBehavior>,
+    search_text_size: usize,
     need_redraw: bool,
     prompt_outdated: bool,
     prompt_state: PromptState,
@@ -160,6 +160,7 @@ impl<'b> UiContext<'b> {
             search_positions: Vec::new(),
             terminal_size: crossterm::terminal::size()?.1 as usize - 1,
             keymap: default_keymap(),
+            search_text_size: 0,
             need_redraw: true,
             prompt_state: PromptState::Normal,
             prompt_outdated: true,
@@ -194,16 +195,16 @@ impl<'b> UiContext<'b> {
                 {
                     let mut prev_pos = 0;
                     for pos in search.iter() {
+                        let end = pos.start as usize + self.search_text_size;
                         self.output_buf
-                            .extend_from_slice(&line[prev_pos as usize..pos.start as usize]);
+                            .extend_from_slice(&line[prev_pos..pos.start as usize]);
                         queue!(self.output_buf, SetAttribute(Attribute::Reverse))?;
                         self.output_buf
-                            .extend_from_slice(&line[pos.start as usize..pos.end as usize]);
+                            .extend_from_slice(&line[pos.start as usize..end]);
                         queue!(self.output_buf, SetAttribute(Attribute::Reset))?;
-                        prev_pos = pos.end;
+                        prev_pos = end;
                     }
-                    self.output_buf
-                        .extend_from_slice(&line[prev_pos as usize..]);
+                    self.output_buf.extend_from_slice(&line[prev_pos..]);
                     self.output_buf.extend_from_slice(b"\r\n");
                 }
             }
@@ -336,6 +337,8 @@ impl<'b> UiContext<'b> {
         #[cfg(feature = "logging")]
         log::debug!("Search: {:?}", needle);
 
+        self.search_text_size = needle.len();
+
         self.lines
             .par_iter()
             .map(|bytes| {
@@ -343,12 +346,13 @@ impl<'b> UiContext<'b> {
                 let mut prev_pos = 0;
 
                 while let Some(pos) = twoway::find_bytes(&bytes[prev_pos..], needle.as_bytes()) {
-                    let start = (prev_pos + pos) as u32;
-                    let end = start + needle.len() as u32;
+                    let start = prev_pos + pos;
 
-                    v.push(SearchPosition { start, end });
+                    v.push(SearchPosition {
+                        start: start as u32,
+                    });
 
-                    prev_pos = end as usize;
+                    prev_pos = start + needle.len();
                 }
 
                 v
