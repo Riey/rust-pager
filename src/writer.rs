@@ -403,7 +403,9 @@ impl<'b> UiContext<'b> {
                             KeyCode::Backspace => {
                                 let s_len = s.chars().count();
                                 if s_len == 0 {
-                                    self.prompt_state = PromptState::Normal; // Cancel the search.
+                                    // Cancel the search.
+                                    self.prompt_state = PromptState::Normal;
+                                    self.search("");
                                 } else {
                                     s.pop();
                                 }
