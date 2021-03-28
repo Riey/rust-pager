@@ -51,6 +51,7 @@ fn main() -> Result<()> {
             File::create("rp.log")?,
         )
         .unwrap();
+        log_panics::init();
     }
 
     let args = match Args::parse() {
