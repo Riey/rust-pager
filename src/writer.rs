@@ -401,13 +401,9 @@ impl<'b> UiContext<'b> {
                                 return Ok(false);
                             }
                             KeyCode::Backspace => {
-                                let s_len = s.chars().count();
-                                if s_len == 0 {
-                                    // Cancel the search.
+                                if s.pop().is_none() {
                                     self.prompt_state = PromptState::Normal;
                                     self.search("");
-                                } else {
-                                    s.pop();
                                 }
 
                                 self.prompt_outdated = true;
