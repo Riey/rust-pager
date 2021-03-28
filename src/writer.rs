@@ -406,7 +406,6 @@ impl<'b> UiContext<'b> {
                             KeyCode::Backspace => {
                                 if s.pop().is_none() {
                                     self.prompt_state = PromptState::Normal;
-                                    self.search("");
                                 }
 
                                 self.prompt_outdated = true;
