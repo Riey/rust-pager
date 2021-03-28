@@ -90,6 +90,7 @@ fn default_keymap() -> AHashMap<KeyEvent, KeyBehavior> {
             (KeyCode::Char('k'), KeyBehavior::Up),
 
             (KeyCode::PageDown, KeyBehavior::PageDown),
+            (KeyCode::PageUp, KeyBehavior::PageUp),
 
             (KeyCode::Esc, KeyBehavior::NormalMode),
             (KeyCode::Home, KeyBehavior::GotoTop),
