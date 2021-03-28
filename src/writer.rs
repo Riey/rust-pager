@@ -341,7 +341,10 @@ impl<'b> UiContext<'b> {
     }
 
     fn search(&mut self, needle: &str) {
-        self.search_positions.clear();
+        if !self.search_positions.is_empty() {
+            self.need_redraw = true;
+            self.search_positions.clear();
+        }
         if needle.is_empty() {
             return;
         }
@@ -350,6 +353,7 @@ impl<'b> UiContext<'b> {
         log::debug!("Search: {:?}", needle);
 
         self.search_text_size = needle.len();
+        self.need_redraw = true;
 
         self.lines
             .par_iter()
@@ -400,7 +404,6 @@ impl<'b> UiContext<'b> {
                             KeyCode::Char(c) => {
                                 s.push(c);
                                 self.prompt_outdated = true;
-                                self.need_redraw = true;
                                 return Ok(false);
                             }
                             KeyCode::Backspace => {
@@ -409,7 +412,6 @@ impl<'b> UiContext<'b> {
                                 }
 
                                 self.prompt_outdated = true;
-                                self.need_redraw = true;
                                 return Ok(false);
                             }
                             KeyCode::Enter => {
@@ -417,7 +419,6 @@ impl<'b> UiContext<'b> {
                                 self.search(&needle);
                                 self.prompt_state = PromptState::Normal;
                                 self.prompt_outdated = true;
-                                self.need_redraw = true;
                                 return Ok(false);
                             }
                             _ => {}
