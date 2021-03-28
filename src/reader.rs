@@ -1,12 +1,7 @@
 use bumpalo::Bump;
 use crossbeam_queue::ArrayQueue;
 use crossterm::Result;
-use std::{
-    fs::File,
-    io::{ErrorKind, Read},
-    sync::Arc,
-    time::Duration,
-};
+use std::{fs::File, io::{ErrorKind, Read}, sync::{Arc, atomic::Ordering}, time::Duration};
 
 fn push_newline<'b>(b: &'b Bump, tx: &ArrayQueue<&'b [u8]>, line: &[u8]) {
     let line = b.alloc_slice_copy(line);
@@ -40,6 +35,10 @@ pub fn read_from_stdin<'b>(
             if !buf.is_empty() {
                 push_newline(b, &tx, buf);
             }
+            break Ok(());
+        }
+
+        if !crate::RUN.load(Ordering::Acquire) {
             break Ok(());
         }
 

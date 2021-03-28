@@ -19,7 +19,7 @@ use smallvec::SmallVec;
 use std::{
     fs::File,
     io::Write,
-    sync::atomic::AtomicBool,
+    sync::atomic::Ordering,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -516,13 +516,6 @@ impl<'b> UiContext<'b> {
     }
 
     pub fn run(&mut self) -> Result<()> {
-        static RUN: AtomicBool = AtomicBool::new(true);
-
-        ctrlc::set_handler(|| {
-            RUN.store(false, std::sync::atomic::Ordering::SeqCst);
-        })
-        .expect("Set ctrlc handler");
-
         const BULK_LINE: usize = 5000;
         const FPS: u64 = 30;
         const TICK: Duration = Duration::from_nanos(Duration::from_secs(1).as_nanos() as u64 / FPS);
@@ -530,7 +523,7 @@ impl<'b> UiContext<'b> {
         let mut prev_time = Instant::now();
 
         loop {
-            if !RUN.load(std::sync::atomic::Ordering::SeqCst) {
+            if !crate::RUN.load(Ordering::Acquire) {
                 return Ok(());
             }
 

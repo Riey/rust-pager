@@ -7,7 +7,9 @@ use crossbeam_utils::thread::scope;
 use crossterm::{tty::IsTty, Result};
 use std::fs::File;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{atomic, Arc};
+
+static RUN: atomic::AtomicBool = atomic::AtomicBool::new(true);
 
 struct Args {
     path: Option<PathBuf>,
@@ -53,6 +55,11 @@ fn main() -> Result<()> {
         .unwrap();
         log_panics::init();
     }
+
+    ctrlc::set_handler(|| {
+        crate::RUN.store(false, atomic::Ordering::Release);
+    })
+    .expect("Set ctrlc handler");
 
     let args = match Args::parse() {
         Some(args) => args,
