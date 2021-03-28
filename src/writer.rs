@@ -204,7 +204,7 @@ impl<'b> UiContext<'b> {
                         queue!(self.output_buf, SetAttribute(Attribute::Reverse))?;
                         self.output_buf
                             .extend_from_slice(&line[pos.start as usize..pos.end as usize]);
-                        queue!(self.output_buf, SetAttribute(Attribute::Reset))?;
+                        queue!(self.output_buf, SetAttribute(Attribute::NoReverse))?;
                         prev_pos = pos.end as usize;
                     }
                     self.output_buf.extend_from_slice(&line[prev_pos..]);
