@@ -299,9 +299,12 @@ impl<'b> UiContext<'b> {
     }
 
     fn goto_scroll(&mut self, idx: usize) {
-        self.scroll = idx.min(self.max_scroll());
-        self.need_redraw = true;
-        self.prompt_outdated = true;
+        let new_scroll = idx.min(self.max_scroll());
+        if new_scroll != self.scroll {
+            self.scroll = new_scroll;
+            self.need_redraw = true;
+            self.prompt_outdated = true;
+        }
     }
 
     fn scroll_down(&mut self, idx: usize) {
