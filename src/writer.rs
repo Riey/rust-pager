@@ -403,6 +403,16 @@ impl<'b> UiContext<'b> {
                                 self.need_redraw = true;
                                 return Ok(false);
                             }
+                            KeyCode::Backspace => {
+                                if s.pop().is_none() {
+                                    self.prompt_state = PromptState::Normal;
+                                    self.search("");
+                                }
+
+                                self.prompt_outdated = true;
+                                self.need_redraw = true;
+                                return Ok(false);
+                            }
                             KeyCode::Enter => {
                                 let needle = std::mem::take(s);
                                 self.search(&needle);
