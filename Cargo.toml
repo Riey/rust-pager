@@ -14,7 +14,7 @@ keywords = [
     "pager",
 ]
 readme = "README.md"
-exclude = [".vscode"]
+exclude = [".vscode", "screenshot.png"]
 
 [[bin]]
 name = "rp"
