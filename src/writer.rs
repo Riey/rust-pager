@@ -215,6 +215,7 @@ impl<'b> UiContext<'b> {
             }
 
             self.update_prompt();
+            queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
             self.output_buf.extend_from_slice(self.prompt.as_bytes());
             #[cfg(feature = "logging")]
             log::trace!("Write {} bytes", buf.len());
