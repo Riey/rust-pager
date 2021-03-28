@@ -34,6 +34,7 @@ fn get_output() -> File {
 #[derive(Clone, Copy)]
 pub struct SearchPosition {
     start: u32,
+    end: u32,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -138,7 +139,6 @@ pub struct UiContext<'b> {
     scroll: usize,
     terminal_line: usize,
     keymap: AHashMap<KeyEvent, KeyBehavior>,
-    search_text_size: usize,
     need_redraw: bool,
     prompt_outdated: bool,
     prompt_state: PromptState,
@@ -163,7 +163,6 @@ impl<'b> UiContext<'b> {
             search_positions: Vec::new(),
             terminal_line: y as usize - 1,
             keymap: default_keymap(),
-            search_text_size: 0,
             need_redraw: true,
             prompt_state: PromptState::Normal,
             prompt_outdated: true,
@@ -200,14 +199,13 @@ impl<'b> UiContext<'b> {
                 {
                     let mut prev_pos = 0;
                     for pos in search.iter() {
-                        let end = pos.start as usize + self.search_text_size;
                         self.output_buf
                             .extend_from_slice(&line[prev_pos..pos.start as usize]);
                         queue!(self.output_buf, SetAttribute(Attribute::Reverse))?;
                         self.output_buf
-                            .extend_from_slice(&line[pos.start as usize..end]);
-                        queue!(self.output_buf, SetAttribute(Attribute::Reset))?;
-                        prev_pos = end;
+                            .extend_from_slice(&line[pos.start as usize..pos.end as usize]);
+                        queue!(self.output_buf, SetAttribute(Attribute::NoReverse))?;
+                        prev_pos = pos.end as usize;
                     }
                     self.output_buf.extend_from_slice(&line[prev_pos..]);
                     queue!(self.output_buf, Clear(ClearType::UntilNewLine))?;
@@ -219,7 +217,7 @@ impl<'b> UiContext<'b> {
             queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
             self.output_buf.extend_from_slice(self.prompt.as_bytes());
             #[cfg(feature = "logging")]
-            log::trace!("Write {} bytes", buf.len());
+            log::trace!("Write {} bytes", self.output_buf.len());
             self.output.write(&self.output_buf)?;
             self.output.flush()?;
             self.need_redraw = false;
@@ -352,27 +350,23 @@ impl<'b> UiContext<'b> {
         #[cfg(feature = "logging")]
         log::debug!("Search: {:?}", needle);
 
-        self.search_text_size = needle.len();
         self.need_redraw = true;
 
         self.lines
             .par_iter()
-            .map(|bytes| {
-                let mut v = SearchPositionArr::new();
-                let mut prev_pos = 0;
+            .map_init(
+                || vte::Parser::new(),
+                |parser, bytes| {
+                    let mut performer = RpPerform::new(needle);
 
-                while let Some(pos) = twoway::find_bytes(&bytes[prev_pos..], needle.as_bytes()) {
-                    let start = prev_pos + pos;
+                    for (i, b) in bytes.iter().enumerate() {
+                        performer.update_pos(i);
+                        parser.advance(&mut performer, *b);
+                    }
 
-                    v.push(SearchPosition {
-                        start: start as u32,
-                    });
-
-                    prev_pos = start + needle.len();
-                }
-
-                v
-            })
+                    performer.into_arr()
+                },
+            )
             .collect_into_vec(&mut self.search_positions);
 
         self.move_search(true);
@@ -577,5 +571,67 @@ impl<'b> Drop for UiContext<'b> {
     fn drop(&mut self) {
         execute!(self.output, Show, DisableMouseCapture, LeaveAlternateScreen).ok();
         disable_raw_mode().ok();
+    }
+}
+
+struct RpPerform<'b> {
+    arr: SearchPositionArr,
+    matching: bool,
+    start: usize,
+    pos: usize,
+    needle: &'b str,
+    left_chars: std::iter::Peekable<std::str::Chars<'b>>,
+}
+
+impl<'b> RpPerform<'b> {
+    pub fn new(needle: &'b str) -> Self {
+        Self {
+            arr: SearchPositionArr::new(),
+            matching: false,
+            start: 0,
+            pos: 0,
+            needle,
+            left_chars: needle.chars().peekable(),
+        }
+    }
+
+    pub fn update_pos(&mut self, pos: usize) {
+        if !self.matching {
+            self.start = pos;
+        }
+        self.pos = pos;
+    }
+
+    pub fn reset(&mut self) {
+        self.start = self.pos;
+        self.left_chars = self.needle.chars().peekable();
+        self.matching = false;
+    }
+
+    pub fn into_arr(self) -> SearchPositionArr {
+        self.arr
+    }
+}
+
+impl<'b> vte::Perform for RpPerform<'b> {
+    fn print(&mut self, c: char) {
+        match self.left_chars.peek() {
+            Some(p) => {
+                if c == *p {
+                    self.matching = true;
+                    self.left_chars.next();
+                    if self.left_chars.peek().is_none() {
+                        self.arr.push(SearchPosition {
+                            start: self.start as u32,
+                            end: self.pos as u32 + 1,
+                        });
+                        self.reset();
+                    }
+                } else {
+                    self.reset();
+                }
+            }
+            None => {}
+        }
     }
 }
