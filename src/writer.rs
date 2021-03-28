@@ -25,10 +25,10 @@ use std::{
 };
 
 type SearchPositionArr = SmallVec<[SearchPosition; 4]>;
+const OUTBUF_SIZE: usize = 1024 * 20;
 
 fn get_output() -> File {
-    use std::os::unix::prelude::FromRawFd;
-    unsafe { File::from_raw_fd(libc::STDOUT_FILENO) }
+    File::create("/dev/tty").expect("Can't open tty")
 }
 
 #[derive(Clone, Copy)]
@@ -135,7 +135,7 @@ pub struct UiContext<'b> {
     output: File,
     output_buf: Vec<u8>,
     scroll: usize,
-    terminal_size: usize,
+    terminal_line: usize,
     keymap: AHashMap<KeyEvent, KeyBehavior>,
     search_text_size: usize,
     need_redraw: bool,
@@ -152,13 +152,15 @@ impl<'b> UiContext<'b> {
 
         execute!(output, EnterAlternateScreen, EnableMouseCapture, Hide)?;
 
+        let (_x, y) = crossterm::terminal::size()?;
+
         Ok(Self {
             rx,
             lines: Vec::with_capacity(1024),
             scroll: 0,
-            output_buf: Vec::with_capacity(1024 * 1024),
+            output_buf: vec![0; OUTBUF_SIZE],
             search_positions: Vec::new(),
-            terminal_size: crossterm::terminal::size()?.1 as usize - 1,
+            terminal_line: y as usize - 1,
             keymap: default_keymap(),
             search_text_size: 0,
             need_redraw: true,
@@ -170,7 +172,7 @@ impl<'b> UiContext<'b> {
     }
 
     fn max_scroll(&self) -> usize {
-        self.lines.len().saturating_sub(self.terminal_size)
+        self.lines.len().saturating_sub(self.terminal_line)
     }
 
     pub fn redraw(&mut self) -> Result<()> {
@@ -179,13 +181,15 @@ impl<'b> UiContext<'b> {
             log::debug!("REDRAW");
 
             self.output_buf.clear();
-            queue!(self.output_buf, Clear(ClearType::All), MoveTo(0, 0))?;
 
-            let end = (self.scroll + self.terminal_size).min(self.lines.len());
+            queue!(self.output_buf, MoveTo(0, 0))?;
+
+            let end = (self.scroll + self.terminal_line).min(self.lines.len());
 
             if self.search_positions.is_empty() {
                 for line in self.lines[self.scroll..end].iter() {
                     self.output_buf.extend_from_slice(line);
+                    queue!(self.output_buf, Clear(ClearType::UntilNewLine))?;
                     self.output_buf.extend_from_slice(b"\r\n");
                 }
             } else {
@@ -205,13 +209,16 @@ impl<'b> UiContext<'b> {
                         prev_pos = end;
                     }
                     self.output_buf.extend_from_slice(&line[prev_pos..]);
+                    queue!(self.output_buf, Clear(ClearType::UntilNewLine))?;
                     self.output_buf.extend_from_slice(b"\r\n");
                 }
             }
 
             self.update_prompt();
             self.output_buf.extend_from_slice(self.prompt.as_bytes());
-            self.output.write_all(&self.output_buf)?;
+            #[cfg(feature = "logging")]
+            log::trace!("Write {} bytes", buf.len());
+            self.output.write(&self.output_buf)?;
             self.output.flush()?;
             self.need_redraw = false;
         } else if self.prompt_outdated {
@@ -225,7 +232,7 @@ impl<'b> UiContext<'b> {
     fn redraw_prompt(&mut self) -> Result<()> {
         self.output_buf.clear();
 
-        let lines = self.terminal_size;
+        let lines = self.terminal_line;
         queue!(
             self.output_buf,
             MoveTo(0, lines as _),
@@ -240,7 +247,7 @@ impl<'b> UiContext<'b> {
     }
 
     pub fn push_line(&mut self, line: &'b [u8]) {
-        if self.lines.len() < self.terminal_size {
+        if self.lines.len() < self.terminal_line {
             self.need_redraw = true;
         }
         self.prompt_outdated = true;
@@ -259,7 +266,7 @@ impl<'b> UiContext<'b> {
                         "{}lines {}-{}/{}",
                         SetAttribute(Attribute::Reverse),
                         self.scroll + 1,
-                        (self.scroll + self.terminal_size).min(self.lines.len()),
+                        (self.scroll + self.terminal_line).min(self.lines.len()),
                         self.lines.len(),
                     )
                     .ok();
@@ -448,18 +455,18 @@ impl<'b> UiContext<'b> {
                         },
                         KeyBehavior::PageDown => match self.prompt_state.take() {
                             PromptState::Number(n) => {
-                                self.scroll_down(self.terminal_size.saturating_mul(n));
+                                self.scroll_down(self.terminal_line.saturating_mul(n));
                             }
                             _ => {
-                                self.scroll_down(self.terminal_size);
+                                self.scroll_down(self.terminal_line);
                             }
                         },
                         KeyBehavior::PageUp => match self.prompt_state.take() {
                             PromptState::Number(n) => {
-                                self.scroll_up(self.terminal_size.saturating_mul(n));
+                                self.scroll_up(self.terminal_line.saturating_mul(n));
                             }
                             _ => {
-                                self.scroll_up(self.terminal_size);
+                                self.scroll_up(self.terminal_line);
                             }
                         },
                         KeyBehavior::GotoTop => match self.prompt_state.take() {
@@ -486,7 +493,7 @@ impl<'b> UiContext<'b> {
                 }
             }
             Event::Resize(_x, y) => {
-                self.terminal_size = y as usize - 1;
+                self.terminal_line = y as usize - 1;
                 self.need_redraw = true;
                 self.prompt_outdated = true;
             }
