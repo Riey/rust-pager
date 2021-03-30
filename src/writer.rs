@@ -146,9 +146,16 @@ fn default_keymap() -> AHashMap<KeyEvent, KeyBehavior> {
         KeyModifiers::CONTROL => [
             (KeyCode::Char('u'), KeyBehavior::Up(ScrollSize::HalfPage)),
             (KeyCode::Char('d'), KeyBehavior::Down(ScrollSize::HalfPage)),
-
             (KeyCode::Char('f'), KeyBehavior::Down(ScrollSize::Page)),
+            (KeyCode::Char('v'), KeyBehavior::Down(ScrollSize::Page)),
             (KeyCode::Char('b'), KeyBehavior::Up(ScrollSize::Page)),
+
+            (KeyCode::Char('e'), KeyBehavior::Down(ScrollSize::One)),
+            (KeyCode::Char('n'), KeyBehavior::Down(ScrollSize::One)),
+
+            (KeyCode::Char('y'), KeyBehavior::Up(ScrollSize::One)),
+            (KeyCode::Char('k'), KeyBehavior::Up(ScrollSize::One)),
+            (KeyCode::Char('p'), KeyBehavior::Up(ScrollSize::One)),
 
             (KeyCode::Char('d'), KeyBehavior::Quit),
             (KeyCode::Char('c'), KeyBehavior::Quit),
