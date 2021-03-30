@@ -230,67 +230,39 @@ impl<'b> UiContext<'b> {
 
             queue!(self.output_buf, MoveTo(0, 0))?;
 
-            let mut current_attribute = Attributes::default();
-            let mut current_color = Color::Reset;
-            let mut current_bgcolor = Color::Reset;
+            let mut ch_writer = ChWriter::new();
             let end = (self.scroll + self.terminal_line).min(self.lines.len());
 
             if self.search_positions.is_empty() {
                 for line in self.lines[self.scroll..end].iter() {
                     queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
-                    for ch in line.iter() {
-                        if current_attribute != ch.attribute {
-                            #[cfg(feature = "logging")]
-                            log::debug!("{:?}", ch.attribute);
-
-                            queue!(self.output_buf, SetAttributes(ch.attribute))?;
-                            // Reset attribute also reset colors
-                            if ch.attribute.has(Attribute::Reset) {
-                                current_color = Color::Reset;
-                                current_bgcolor = Color::Reset;
-                            }
-                            current_attribute = ch.attribute;
-                        }
-                        if ch.foreground != current_color {
-                            queue!(self.output_buf, SetForegroundColor(ch.foreground))?;
-                            current_color = ch.foreground;
-                        }
-                        if ch.background != current_bgcolor {
-                            queue!(self.output_buf, SetBackgroundColor(ch.background))?;
-                            current_bgcolor = ch.background;
-                        }
-
-                        write!(self.output_buf, "{}", ch.ch)?;
-                    }
+                    ch_writer.write_slice(&mut self.output_buf, line)?;
                     queue!(self.output_buf, MoveToNextLine(1))?;
                 }
             } else {
-                todo!()
-                // for (line, search) in self.lines[self.scroll..end]
-                //     .iter()
-                //     .zip(self.search_positions[self.scroll..end].iter())
-                // {
-                //     queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
-                //     let mut prev_pos = 0;
-                //     for pos in search.iter() {
-                //         self.output_buf
-                //             .extend_from_slice(&line[prev_pos..pos.start as usize]);
-                //         queue!(self.output_buf, SetAttribute(Attribute::Reverse))?;
-                //         self.output_buf
-                //             .extend_from_slice(&line[pos.start as usize..pos.end as usize]);
-                //         queue!(self.output_buf, SetAttribute(Attribute::NoReverse))?;
-                //         prev_pos = pos.end as usize;
-                //     }
-                //     self.output_buf.extend_from_slice(&line[prev_pos..]);
-                //     self.output_buf.extend_from_slice(b"\r\n");
-                // }
+                for (line, search) in self.lines[self.scroll..end]
+                    .iter()
+                    .zip(self.search_positions[self.scroll..end].iter())
+                {
+                    queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
+                    let mut prev_pos = 0;
+                    for pos in search.iter() {
+                        ch_writer.write_slice(
+                            &mut self.output_buf,
+                            &line[prev_pos..pos.start as usize],
+                        )?;
+                        ch_writer.write_slice_reverse(
+                            &mut self.output_buf,
+                            &line[pos.start as usize..pos.end as usize],
+                        )?;
+                        prev_pos = pos.end as usize;
+                    }
+                    ch_writer.write_slice(&mut self.output_buf, &line[prev_pos..])?;
+                    queue!(self.output_buf, MoveToNextLine(1))?;
+                }
             }
 
-            queue!(
-                self.output_buf,
-                SetForegroundColor(Color::Reset),
-                SetBackgroundColor(Color::Reset)
-            )?;
+            queue!(self.output_buf, SetAttribute(Attribute::Reset),)?;
             self.update_prompt();
             queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
             self.output_buf.extend_from_slice(self.prompt.as_bytes());
@@ -616,5 +588,56 @@ impl<'b> Drop for UiContext<'b> {
         )
         .ok();
         disable_raw_mode().ok();
+    }
+}
+
+struct ChWriter {
+    current_color: Color,
+    current_bgcolor: Color,
+    current_attribute: Attributes,
+}
+
+impl ChWriter {
+    pub fn new() -> Self {
+        Self {
+            current_color: Color::Reset,
+            current_bgcolor: Color::Reset,
+            current_attribute: Attributes::default(),
+        }
+    }
+
+    pub fn write_slice_reverse(&mut self, out: &mut Vec<u8>, chars: &[RpChar]) -> Result<()> {
+        chars.iter().copied().try_for_each(|mut ch| {
+            ch.attribute.set(Attribute::Reverse);
+            self.write(out, ch)
+        })
+    }
+
+    pub fn write_slice(&mut self, out: &mut Vec<u8>, chars: &[RpChar]) -> Result<()> {
+        chars.iter().copied().try_for_each(|ch| self.write(out, ch))
+    }
+
+    pub fn write(&mut self, out: &mut Vec<u8>, ch: RpChar) -> Result<()> {
+        if self.current_attribute != ch.attribute {
+            queue!(out, SetAttributes(ch.attribute))?;
+            // Reset attribute also reset colors
+            if ch.attribute.has(Attribute::Reset) {
+                self.current_color = Color::Reset;
+                self.current_bgcolor = Color::Reset;
+            }
+            self.current_attribute = ch.attribute;
+        }
+        if ch.foreground != self.current_color {
+            queue!(out, SetForegroundColor(ch.foreground))?;
+            self.current_color = ch.foreground;
+        }
+        if ch.background != self.current_bgcolor {
+            queue!(out, SetBackgroundColor(ch.background))?;
+            self.current_bgcolor = ch.background;
+        }
+
+        write!(out, "{}", ch.ch)?;
+
+        Ok(())
     }
 }
