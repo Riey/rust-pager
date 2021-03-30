@@ -1,4 +1,4 @@
-use crate::shared::{Buffer, RpChar, RpLine};
+use crate::shared::{Buffer, RpLine};
 use bumpalo::Bump;
 use crossbeam_queue::ArrayQueue;
 use crossterm::Result;

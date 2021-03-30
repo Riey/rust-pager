@@ -26,6 +26,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use unicode_width::UnicodeWidthChar;
 
 use crate::shared::{RpChar, RpLine};
 
@@ -178,6 +179,8 @@ pub struct UiContext<'b> {
     output_buf: Vec<u8>,
     scroll: usize,
     terminal_line: usize,
+    terminal_column: usize,
+    prev_wrap: usize,
     keymap: AHashMap<KeyEvent, KeyBehavior>,
     need_redraw: bool,
     prompt_outdated: bool,
@@ -199,7 +202,7 @@ impl<'b> UiContext<'b> {
             Hide
         )?;
 
-        let (_x, y) = crossterm::terminal::size()?;
+        let (x, y) = crossterm::terminal::size()?;
 
         Ok(Self {
             rx,
@@ -209,8 +212,10 @@ impl<'b> UiContext<'b> {
             search_positions: Vec::new(),
             search_char_len: 0,
             terminal_line: y as usize - 1,
+            terminal_column: x as usize,
             keymap: default_keymap(),
             need_redraw: true,
+            prev_wrap: 0,
             prompt_state: PromptState::Normal,
             prompt_outdated: true,
             prompt: String::with_capacity(256),
@@ -231,20 +236,27 @@ impl<'b> UiContext<'b> {
 
             queue!(self.output_buf, MoveTo(0, 0))?;
 
-            let mut ch_writer = ChWriter::new();
+            let mut prev_wrap = 0;
+            let mut ch_writer = ChWriter::new(self.terminal_column);
             let end = (self.scroll + self.terminal_line).min(self.lines.len());
 
             if self.search_positions.is_empty() {
-                for line in self.lines[self.scroll..end].iter() {
+                let mut iter = self.lines[self.scroll..end].iter();
+                while let Some(line) = iter.next() {
                     queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
                     ch_writer.write_slice(&mut self.output_buf, line)?;
+                    for _ in prev_wrap..ch_writer.wrap {
+                        iter.next_back();
+                    }
+                    prev_wrap = ch_writer.wrap;
+                    ch_writer.pos = 0;
                     queue!(self.output_buf, MoveToNextLine(1))?;
                 }
             } else {
-                for (line, search) in self.lines[self.scroll..end]
+                let mut iter = self.lines[self.scroll..end]
                     .iter()
-                    .zip(self.search_positions[self.scroll..end].iter())
-                {
+                    .zip(self.search_positions[self.scroll..end].iter());
+                while let Some((line, search)) = iter.next() {
                     queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
                     let mut prev_pos = 0;
                     for pos in search.iter() {
@@ -256,6 +268,11 @@ impl<'b> UiContext<'b> {
                         prev_pos = end;
                     }
                     ch_writer.write_slice(&mut self.output_buf, &line[prev_pos..])?;
+                    for _ in prev_wrap..ch_writer.wrap {
+                        iter.next_back();
+                    }
+                    prev_wrap = ch_writer.wrap;
+                    ch_writer.pos = 0;
                     queue!(self.output_buf, MoveToNextLine(1))?;
                 }
             }
@@ -314,7 +331,7 @@ impl<'b> UiContext<'b> {
                         "{}lines {}-{}/{}",
                         SetAttribute(Attribute::Reverse),
                         self.scroll + 1,
-                        (self.scroll + self.terminal_line).min(self.lines.len()),
+                        (self.scroll + self.terminal_line).saturating_sub(self.prev_wrap).min(self.lines.len()),
                         self.lines.len(),
                     )
                     .ok();
@@ -525,7 +542,8 @@ impl<'b> UiContext<'b> {
                     None => {}
                 }
             }
-            Event::Resize(_x, y) => {
+            Event::Resize(x, y) => {
+                self.terminal_column = x as usize;
                 self.terminal_line = y as usize - 1;
                 self.need_redraw = true;
                 self.prompt_outdated = true;
@@ -596,14 +614,20 @@ impl<'b> Drop for UiContext<'b> {
 }
 
 struct ChWriter {
+    terminal_column: usize,
+    wrap: usize,
+    pos: usize,
     current_color: Color,
     current_bgcolor: Color,
     current_attribute: Attributes,
 }
 
 impl ChWriter {
-    pub fn new() -> Self {
+    pub fn new(terminal_column: usize) -> Self {
         Self {
+            terminal_column,
+            wrap: 0,
+            pos: 0,
             current_color: Color::Reset,
             current_bgcolor: Color::Reset,
             current_attribute: Attributes::default(),
@@ -615,6 +639,7 @@ impl ChWriter {
             ch.attribute.set(Attribute::Reverse);
             self.write(out, ch)
         })?;
+        self.current_attribute.unset(Attribute::Reverse);
         queue!(out, SetAttribute(Attribute::NoReverse))
     }
 
@@ -641,8 +666,22 @@ impl ChWriter {
             self.current_bgcolor = ch.background;
         }
 
-        write!(out, "{}", ch.ch)?;
+        let width = ch.ch.width().unwrap_or(0);
+
+        if self.pos + width > self.terminal_column {
+            queue!(out, MoveToNextLine(1), Clear(ClearType::CurrentLine))?;
+            self.wrap += 1;
+            self.pos = width;
+        } else {
+            write!(out, "{}", ch.ch)?;
+            self.pos += width;
+        }
 
         Ok(())
     }
 }
+
+// fn line_width(l: RpLine) -> usize {
+//     l.iter().map(|c| c.ch.width().unwrap_or(0)).sum::<usize>()
+// }
+
