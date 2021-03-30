@@ -106,6 +106,11 @@ fn default_keymap() -> AHashMap<KeyEvent, KeyBehavior> {
             (KeyCode::Up, KeyBehavior::Up(ScrollSize::One)),
             (KeyCode::Char('k'), KeyBehavior::Up(ScrollSize::One)),
 
+            (KeyCode::Char('u'), KeyBehavior::Up(ScrollSize::HalfPage)),
+            (KeyCode::Char('d'), KeyBehavior::Down(ScrollSize::HalfPage)),
+            (KeyCode::Left, KeyBehavior::Up(ScrollSize::HalfPage)),
+            (KeyCode::Right, KeyBehavior::Down(ScrollSize::HalfPage)),
+
             (KeyCode::Char('f'), KeyBehavior::Down(ScrollSize::Page)),
             (KeyCode::Char(' '), KeyBehavior::Down(ScrollSize::Page)),
             (KeyCode::Char('b'), KeyBehavior::Up(ScrollSize::Page)),
@@ -136,8 +141,12 @@ fn default_keymap() -> AHashMap<KeyEvent, KeyBehavior> {
         KeyModifiers::SHIFT => [
             (KeyCode::Char('G'), KeyBehavior::Down(ScrollSize::End)),
             (KeyCode::Char('N'), KeyBehavior::SearchPrev),
+            (KeyCode::Char('Q'), KeyBehavior::Quit),
         ],
         KeyModifiers::CONTROL => [
+            (KeyCode::Char('u'), KeyBehavior::Up(ScrollSize::HalfPage)),
+            (KeyCode::Char('d'), KeyBehavior::Down(ScrollSize::HalfPage)),
+
             (KeyCode::Char('f'), KeyBehavior::Down(ScrollSize::Page)),
             (KeyCode::Char('b'), KeyBehavior::Up(ScrollSize::Page)),
 
