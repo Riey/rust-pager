@@ -1,4 +1,5 @@
 mod reader;
+mod shared;
 mod writer;
 
 use bumpalo::Bump;

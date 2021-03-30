@@ -1,16 +1,19 @@
 use ahash::AHashMap;
 use crossbeam_queue::ArrayQueue;
 use crossterm::{
-    cursor::{Hide, MoveTo, Show},
+    cursor::{Hide, MoveTo, MoveToNextLine, Show},
     event::{
         poll, read, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent,
         KeyModifiers, MouseEvent, MouseEventKind,
     },
     execute, queue,
-    style::{Attribute, SetAttribute},
+    style::{
+        Attribute, Attributes, Color, SetAttribute, SetAttributes, SetBackgroundColor,
+        SetForegroundColor,
+    },
     terminal::{
-        disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
-        LeaveAlternateScreen,
+        disable_raw_mode, enable_raw_mode, Clear, ClearType, DisableLineWrap, EnableLineWrap,
+        EnterAlternateScreen, LeaveAlternateScreen,
     },
     Result,
 };
@@ -23,6 +26,8 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+
+use crate::shared::{RpChar, RpLine};
 
 type SearchPositionArr = SmallVec<[SearchPosition; 4]>;
 const OUTBUF_SIZE: usize = 1024 * 20;
@@ -166,8 +171,8 @@ fn default_keymap() -> AHashMap<KeyEvent, KeyBehavior> {
 }
 
 pub struct UiContext<'b> {
-    rx: Arc<ArrayQueue<&'b [u8]>>,
-    lines: Vec<&'b [u8]>,
+    rx: Arc<ArrayQueue<RpLine<'b>>>,
+    lines: Vec<RpLine<'b>>,
     search_positions: Vec<SearchPositionArr>,
     output: File,
     output_buf: Vec<u8>,
@@ -181,12 +186,18 @@ pub struct UiContext<'b> {
 }
 
 impl<'b> UiContext<'b> {
-    pub fn new(rx: Arc<ArrayQueue<&'b [u8]>>) -> Result<Self> {
+    pub fn new(rx: Arc<ArrayQueue<RpLine<'b>>>) -> Result<Self> {
         enable_raw_mode()?;
 
         let mut output = get_output();
 
-        execute!(output, EnterAlternateScreen, EnableMouseCapture, Hide)?;
+        execute!(
+            output,
+            EnterAlternateScreen,
+            EnableMouseCapture,
+            DisableLineWrap,
+            Hide
+        )?;
 
         let (_x, y) = crossterm::terminal::size()?;
 
@@ -219,35 +230,67 @@ impl<'b> UiContext<'b> {
 
             queue!(self.output_buf, MoveTo(0, 0))?;
 
+            let mut current_attribute = Attributes::default();
+            let mut current_color = Color::Reset;
+            let mut current_bgcolor = Color::Reset;
             let end = (self.scroll + self.terminal_line).min(self.lines.len());
 
             if self.search_positions.is_empty() {
                 for line in self.lines[self.scroll..end].iter() {
                     queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
-                    self.output_buf.extend_from_slice(line);
-                    self.output_buf.extend_from_slice(b"\r\n");
+                    for ch in line.iter() {
+                        if current_attribute != ch.attribute {
+                            #[cfg(feature = "logging")]
+                            log::debug!("{:?}", ch.attribute);
+
+                            queue!(self.output_buf, SetAttributes(ch.attribute))?;
+                            // Reset attribute also reset colors
+                            if ch.attribute.has(Attribute::Reset) {
+                                current_color = Color::Reset;
+                                current_bgcolor = Color::Reset;
+                            }
+                            current_attribute = ch.attribute;
+                        }
+                        if ch.foreground != current_color {
+                            queue!(self.output_buf, SetForegroundColor(ch.foreground))?;
+                            current_color = ch.foreground;
+                        }
+                        if ch.background != current_bgcolor {
+                            queue!(self.output_buf, SetBackgroundColor(ch.background))?;
+                            current_bgcolor = ch.background;
+                        }
+
+                        write!(self.output_buf, "{}", ch.ch)?;
+                    }
+                    queue!(self.output_buf, MoveToNextLine(1))?;
                 }
             } else {
-                for (line, search) in self.lines[self.scroll..end]
-                    .iter()
-                    .zip(self.search_positions[self.scroll..end].iter())
-                {
-                    queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
-                    let mut prev_pos = 0;
-                    for pos in search.iter() {
-                        self.output_buf
-                            .extend_from_slice(&line[prev_pos..pos.start as usize]);
-                        queue!(self.output_buf, SetAttribute(Attribute::Reverse))?;
-                        self.output_buf
-                            .extend_from_slice(&line[pos.start as usize..pos.end as usize]);
-                        queue!(self.output_buf, SetAttribute(Attribute::NoReverse))?;
-                        prev_pos = pos.end as usize;
-                    }
-                    self.output_buf.extend_from_slice(&line[prev_pos..]);
-                    self.output_buf.extend_from_slice(b"\r\n");
-                }
+                todo!()
+                // for (line, search) in self.lines[self.scroll..end]
+                //     .iter()
+                //     .zip(self.search_positions[self.scroll..end].iter())
+                // {
+                //     queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
+                //     let mut prev_pos = 0;
+                //     for pos in search.iter() {
+                //         self.output_buf
+                //             .extend_from_slice(&line[prev_pos..pos.start as usize]);
+                //         queue!(self.output_buf, SetAttribute(Attribute::Reverse))?;
+                //         self.output_buf
+                //             .extend_from_slice(&line[pos.start as usize..pos.end as usize]);
+                //         queue!(self.output_buf, SetAttribute(Attribute::NoReverse))?;
+                //         prev_pos = pos.end as usize;
+                //     }
+                //     self.output_buf.extend_from_slice(&line[prev_pos..]);
+                //     self.output_buf.extend_from_slice(b"\r\n");
+                // }
             }
 
+            queue!(
+                self.output_buf,
+                SetForegroundColor(Color::Reset),
+                SetBackgroundColor(Color::Reset)
+            )?;
             self.update_prompt();
             queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
             self.output_buf.extend_from_slice(self.prompt.as_bytes());
@@ -281,7 +324,7 @@ impl<'b> UiContext<'b> {
         Ok(())
     }
 
-    pub fn push_line(&mut self, line: &'b [u8]) {
+    pub fn push_line(&mut self, line: RpLine<'b>) {
         if self.lines.len() < self.terminal_line {
             self.need_redraw = true;
         }
@@ -372,37 +415,38 @@ impl<'b> UiContext<'b> {
     }
 
     fn search(&mut self, needle: &str) {
-        if !self.search_positions.is_empty() {
-            self.need_redraw = true;
-            self.search_positions.clear();
-        }
-        if needle.is_empty() {
-            return;
-        }
+        todo!()
+        // if !self.search_positions.is_empty() {
+        //     self.need_redraw = true;
+        //     self.search_positions.clear();
+        // }
+        // if needle.is_empty() {
+        //     return;
+        // }
 
-        #[cfg(feature = "logging")]
-        log::debug!("Search: {:?}", needle);
+        // #[cfg(feature = "logging")]
+        // log::debug!("Search: {:?}", needle);
 
-        self.need_redraw = true;
+        // self.need_redraw = true;
 
-        self.lines
-            .par_iter()
-            .map_init(
-                || vte::Parser::new(),
-                |parser, bytes| {
-                    let mut performer = RpPerform::new(needle);
+        // self.lines
+        //     .par_iter()
+        //     .map_init(
+        //         || vte::Parser::new(),
+        //         |parser, chars| {
+        //             let mut performer = RpPerform::new(needle);
 
-                    for (i, b) in bytes.iter().enumerate() {
-                        performer.update_pos(i);
-                        parser.advance(&mut performer, *b);
-                    }
+        //             for (i, b) in bytes.iter().enumerate() {
+        //                 performer.update_pos(i);
+        //                 parser.advance(&mut performer, *b);
+        //             }
 
-                    performer.into_arr()
-                },
-            )
-            .collect_into_vec(&mut self.search_positions);
+        //             performer.into_arr()
+        //         },
+        //     )
+        //     .collect_into_vec(&mut self.search_positions);
 
-        self.move_search(true);
+        // self.move_search(true);
     }
 
     pub fn handle_event(&mut self, event: Event) -> Result<bool> {
@@ -485,27 +529,19 @@ impl<'b> UiContext<'b> {
                         KeyBehavior::Up(size) => {
                             let size = size.calculate(self.terminal_line);
                             let n = match self.prompt_state.take() {
-                                PromptState::Number(n) => {
-                                    n
-                                }
-                                _ => {
-                                    1
-                                }
+                                PromptState::Number(n) => n,
+                                _ => 1,
                             };
                             self.scroll_up(size.wrapping_mul(n));
-                        },
+                        }
                         KeyBehavior::Down(size) => {
                             let size = size.calculate(self.terminal_line);
                             let n = match self.prompt_state.take() {
-                                PromptState::Number(n) => {
-                                    n
-                                }
-                                _ => {
-                                    1
-                                }
+                                PromptState::Number(n) => n,
+                                _ => 1,
                             };
                             self.scroll_down(size.wrapping_mul(n));
-                        },
+                        }
                         KeyBehavior::Quit => {
                             return Ok(true);
                         }
@@ -571,69 +607,14 @@ impl<'b> UiContext<'b> {
 
 impl<'b> Drop for UiContext<'b> {
     fn drop(&mut self) {
-        execute!(self.output, Show, DisableMouseCapture, LeaveAlternateScreen).ok();
+        execute!(
+            self.output,
+            Show,
+            EnableLineWrap,
+            DisableMouseCapture,
+            LeaveAlternateScreen
+        )
+        .ok();
         disable_raw_mode().ok();
-    }
-}
-
-struct RpPerform<'b> {
-    arr: SearchPositionArr,
-    matching: bool,
-    start: usize,
-    pos: usize,
-    needle: &'b str,
-    left_chars: std::iter::Peekable<std::str::Chars<'b>>,
-}
-
-impl<'b> RpPerform<'b> {
-    pub fn new(needle: &'b str) -> Self {
-        Self {
-            arr: SearchPositionArr::new(),
-            matching: false,
-            start: 0,
-            pos: 0,
-            needle,
-            left_chars: needle.chars().peekable(),
-        }
-    }
-
-    pub fn update_pos(&mut self, pos: usize) {
-        if !self.matching {
-            self.start = pos;
-        }
-        self.pos = pos;
-    }
-
-    pub fn reset(&mut self) {
-        self.start = self.pos;
-        self.left_chars = self.needle.chars().peekable();
-        self.matching = false;
-    }
-
-    pub fn into_arr(self) -> SearchPositionArr {
-        self.arr
-    }
-}
-
-impl<'b> vte::Perform for RpPerform<'b> {
-    fn print(&mut self, c: char) {
-        match self.left_chars.peek() {
-            Some(p) => {
-                if c == *p {
-                    self.matching = true;
-                    self.left_chars.next();
-                    if self.left_chars.peek().is_none() {
-                        self.arr.push(SearchPosition {
-                            start: self.start as u32,
-                            end: self.pos as u32 + 1,
-                        });
-                        self.reset();
-                    }
-                } else {
-                    self.reset();
-                }
-            }
-            None => {}
-        }
     }
 }

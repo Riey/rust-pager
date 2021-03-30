@@ -1,10 +1,27 @@
+use crate::shared::{Buffer, RpChar, RpLine};
 use bumpalo::Bump;
 use crossbeam_queue::ArrayQueue;
 use crossterm::Result;
-use std::{fs::File, io::{ErrorKind, Read}, sync::{Arc, atomic::Ordering}, time::Duration};
+use std::{
+    fs::File,
+    io::{ErrorKind, Read},
+    sync::{atomic::Ordering, Arc},
+    time::Duration,
+};
 
-fn push_newline<'b>(b: &'b Bump, tx: &ArrayQueue<&'b [u8]>, line: &[u8]) {
-    let line = b.alloc_slice_copy(line);
+fn push_newline<'b>(
+    b: &'b Bump,
+    tx: &ArrayQueue<RpLine<'b>>,
+    parser: &mut vte::Parser,
+    buffer: &mut Buffer,
+    line: &[u8],
+) {
+    for b in line.iter() {
+        parser.advance(buffer, *b);
+    }
+
+    let line = b.alloc_slice_copy(&buffer.buf);
+    buffer.buf.clear();
 
     while tx.push(line).is_err() {
         if !crate::RUN.load(Ordering::Acquire) {
@@ -18,8 +35,10 @@ fn push_newline<'b>(b: &'b Bump, tx: &ArrayQueue<&'b [u8]>, line: &[u8]) {
 pub fn read_from_stdin<'b>(
     mut stdin: File,
     b: &'b mut Bump,
-    tx: Arc<ArrayQueue<&'b [u8]>>,
+    tx: Arc<ArrayQueue<RpLine<'b>>>,
 ) -> Result<()> {
+    let mut parser = vte::Parser::new();
+    let mut buffer = Buffer::new();
     let mut stdin_buf = [0; 8196];
     let mut start_len = 0;
 
@@ -37,7 +56,7 @@ pub fn read_from_stdin<'b>(
             #[cfg(feature = "logging")]
             log::info!("EOF");
             if !buf.is_empty() {
-                push_newline(b, &tx, buf);
+                push_newline(b, &tx, &mut parser, &mut buffer, buf);
             }
             break Ok(());
         }
@@ -53,7 +72,7 @@ pub fn read_from_stdin<'b>(
                 Some(pos) => {
                     let (line, new_buf) = buf.split_at(pos);
                     buf = new_buf.split_first().expect("Must success").1;
-                    push_newline(b, &tx, line);
+                    push_newline(b, &tx, &mut parser, &mut buffer, line);
                 }
                 None => {
                     break;
@@ -67,7 +86,7 @@ pub fn read_from_stdin<'b>(
             #[cfg(feature = "logging")]
             log::info!("Too many bytes");
             // send incomplete single line
-            push_newline(b, &tx, &buf);
+            push_newline(b, &tx, &mut parser, &mut buffer, buf);
             break Ok(());
         } else if start_len == end_len {
             // no bytes processed
