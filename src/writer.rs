@@ -39,7 +39,6 @@ fn get_output() -> File {
 #[derive(Clone, Copy)]
 pub struct SearchPosition {
     start: u32,
-    end: u32,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -174,6 +173,7 @@ pub struct UiContext<'b> {
     rx: Arc<ArrayQueue<RpLine<'b>>>,
     lines: Vec<RpLine<'b>>,
     search_positions: Vec<SearchPositionArr>,
+    search_char_len: usize,
     output: File,
     output_buf: Vec<u8>,
     scroll: usize,
@@ -207,6 +207,7 @@ impl<'b> UiContext<'b> {
             scroll: 0,
             output_buf: vec![0; OUTBUF_SIZE],
             search_positions: Vec::new(),
+            search_char_len: 0,
             terminal_line: y as usize - 1,
             keymap: default_keymap(),
             need_redraw: true,
@@ -247,15 +248,12 @@ impl<'b> UiContext<'b> {
                     queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
                     let mut prev_pos = 0;
                     for pos in search.iter() {
-                        ch_writer.write_slice(
-                            &mut self.output_buf,
-                            &line[prev_pos..pos.start as usize],
-                        )?;
-                        ch_writer.write_slice_reverse(
-                            &mut self.output_buf,
-                            &line[pos.start as usize..pos.end as usize],
-                        )?;
-                        prev_pos = pos.end as usize;
+                        let start = pos.start as usize;
+                        let end = start + self.search_char_len;
+
+                        ch_writer.write_slice(&mut self.output_buf, &line[prev_pos..start])?;
+                        ch_writer.write_slice_reverse(&mut self.output_buf, &line[start..end])?;
+                        prev_pos = end;
                     }
                     ch_writer.write_slice(&mut self.output_buf, &line[prev_pos..])?;
                     queue!(self.output_buf, MoveToNextLine(1))?;
@@ -387,38 +385,44 @@ impl<'b> UiContext<'b> {
     }
 
     fn search(&mut self, needle: &str) {
-        todo!()
-        // if !self.search_positions.is_empty() {
-        //     self.need_redraw = true;
-        //     self.search_positions.clear();
-        // }
-        // if needle.is_empty() {
-        //     return;
-        // }
+        if !self.search_positions.is_empty() {
+            self.need_redraw = true;
+            self.search_positions.clear();
+        }
 
-        // #[cfg(feature = "logging")]
-        // log::debug!("Search: {:?}", needle);
+        if needle.is_empty() {
+            return;
+        }
 
-        // self.need_redraw = true;
+        let char_count = needle.chars().count();
+        self.search_char_len = char_count;
 
-        // self.lines
-        //     .par_iter()
-        //     .map_init(
-        //         || vte::Parser::new(),
-        //         |parser, chars| {
-        //             let mut performer = RpPerform::new(needle);
+        #[cfg(feature = "logging")]
+        log::debug!("Search: {:?}", needle);
 
-        //             for (i, b) in bytes.iter().enumerate() {
-        //                 performer.update_pos(i);
-        //                 parser.advance(&mut performer, *b);
-        //             }
+        self.need_redraw = true;
 
-        //             performer.into_arr()
-        //         },
-        //     )
-        //     .collect_into_vec(&mut self.search_positions);
+        self.lines
+            .par_iter()
+            .map(|chars| {
+                let mut arr = SearchPositionArr::new();
 
-        // self.move_search(true);
+                for i in 0..chars.len() {
+                    if chars[i..]
+                        .iter()
+                        .take(char_count)
+                        .map(|c| c.ch)
+                        .eq(needle.chars())
+                    {
+                        arr.push(SearchPosition { start: i as u32 });
+                    }
+                }
+
+                arr
+            })
+            .collect_into_vec(&mut self.search_positions);
+
+        self.move_search(true);
     }
 
     pub fn handle_event(&mut self, event: Event) -> Result<bool> {
@@ -610,7 +614,8 @@ impl ChWriter {
         chars.iter().copied().try_for_each(|mut ch| {
             ch.attribute.set(Attribute::Reverse);
             self.write(out, ch)
-        })
+        })?;
+        queue!(out, SetAttribute(Attribute::NoReverse))
     }
 
     pub fn write_slice(&mut self, out: &mut Vec<u8>, chars: &[RpChar]) -> Result<()> {

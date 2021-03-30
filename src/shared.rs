@@ -2,7 +2,7 @@ use crossterm::style::{Attribute, Attributes, Color};
 use std::convert::TryFrom;
 use vte::Params;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct RpChar {
     pub ch: char,
     pub foreground: Color,
