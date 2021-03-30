@@ -7,6 +7,10 @@ fn push_newline<'b>(b: &'b Bump, tx: &ArrayQueue<&'b [u8]>, line: &[u8]) {
     let line = b.alloc_slice_copy(line);
 
     while tx.push(line).is_err() {
+        if !crate::RUN.load(Ordering::Acquire) {
+            return;
+        }
+
         std::thread::sleep(Duration::from_millis(50));
     }
 }
