@@ -51,14 +51,30 @@ impl PromptState {
 }
 
 #[derive(Clone, Copy)]
+pub enum ScrollSize {
+    One,
+    HalfPage,
+    Page,
+    End,
+}
+
+impl ScrollSize {
+    pub const fn calculate(self, terminal_line: usize) -> usize {
+        match self {
+            Self::One => 1,
+            Self::HalfPage => terminal_line / 2,
+            Self::Page => terminal_line,
+            Self::End => usize::MAX,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub enum KeyBehavior {
     Quit,
-    Down,
-    Up,
-    PageDown,
-    PageUp,
-    GotoEnd,
-    GotoTop,
+
+    Down(ScrollSize),
+    Up(ScrollSize),
 
     SearchNext,
     SearchPrev,
@@ -83,20 +99,23 @@ fn default_keymap() -> AHashMap<KeyEvent, KeyBehavior> {
 
     keymap! {
         KeyModifiers::NONE => [
-            (KeyCode::Enter, KeyBehavior::Down),
-            (KeyCode::Down, KeyBehavior::Down),
-            (KeyCode::Char('j'), KeyBehavior::Down),
+            (KeyCode::Enter, KeyBehavior::Down(ScrollSize::One)),
+            (KeyCode::Down, KeyBehavior::Down(ScrollSize::One)),
+            (KeyCode::Char('j'), KeyBehavior::Down(ScrollSize::One)),
 
-            (KeyCode::Up, KeyBehavior::Up),
-            (KeyCode::Char('k'), KeyBehavior::Up),
+            (KeyCode::Up, KeyBehavior::Up(ScrollSize::One)),
+            (KeyCode::Char('k'), KeyBehavior::Up(ScrollSize::One)),
 
-            (KeyCode::PageDown, KeyBehavior::PageDown),
-            (KeyCode::PageUp, KeyBehavior::PageUp),
+            (KeyCode::Char('f'), KeyBehavior::Down(ScrollSize::Page)),
+            (KeyCode::Char(' '), KeyBehavior::Down(ScrollSize::Page)),
+            (KeyCode::Char('b'), KeyBehavior::Up(ScrollSize::Page)),
+            (KeyCode::PageDown, KeyBehavior::Down(ScrollSize::Page)),
+            (KeyCode::PageUp, KeyBehavior::Up(ScrollSize::Page)),
 
             (KeyCode::Esc, KeyBehavior::NormalMode),
-            (KeyCode::Home, KeyBehavior::GotoTop),
-            (KeyCode::End, KeyBehavior::GotoEnd),
-            (KeyCode::Char('g'), KeyBehavior::GotoTop),
+            (KeyCode::Home, KeyBehavior::Up(ScrollSize::End)),
+            (KeyCode::End, KeyBehavior::Down(ScrollSize::End)),
+            (KeyCode::Char('g'), KeyBehavior::Up(ScrollSize::End)),
 
             (KeyCode::Char('q'), KeyBehavior::Quit),
 
@@ -115,12 +134,12 @@ fn default_keymap() -> AHashMap<KeyEvent, KeyBehavior> {
             (KeyCode::Char('9'), KeyBehavior::Number(9)),
         ],
         KeyModifiers::SHIFT => [
-            (KeyCode::Char('G'), KeyBehavior::GotoEnd),
+            (KeyCode::Char('G'), KeyBehavior::Down(ScrollSize::End)),
             (KeyCode::Char('N'), KeyBehavior::SearchPrev),
         ],
         KeyModifiers::CONTROL => [
-            (KeyCode::Char('f'), KeyBehavior::PageDown),
-            (KeyCode::Char('b'), KeyBehavior::PageUp),
+            (KeyCode::Char('f'), KeyBehavior::Down(ScrollSize::Page)),
+            (KeyCode::Char('b'), KeyBehavior::Up(ScrollSize::Page)),
 
             (KeyCode::Char('d'), KeyBehavior::Quit),
             (KeyCode::Char('c'), KeyBehavior::Quit),
@@ -324,13 +343,11 @@ impl<'b> UiContext<'b> {
 
         let line = if forward {
             next.chain(prev)
-                .filter_map(|(line, p)| if !p.is_empty() { Some(line) } else { None })
-                .next()
+                .find_map(|(line, p)| if !p.is_empty() { Some(line) } else { None })
         } else {
             prev.rev()
                 .chain(next.rev())
-                .filter_map(|(line, p)| if !p.is_empty() { Some(line) } else { None })
-                .next()
+                .find_map(|(line, p)| if !p.is_empty() { Some(line) } else { None })
         };
 
         if let Some(line) = line {
@@ -449,53 +466,29 @@ impl<'b> UiContext<'b> {
                                 self.prompt_outdated = true;
                             }
                         },
-                        KeyBehavior::Up => match self.prompt_state.take() {
-                            PromptState::Number(n) => {
-                                self.scroll_up(n);
-                            }
-                            _ => {
-                                self.scroll_up(1);
-                            }
+                        KeyBehavior::Up(size) => {
+                            let size = size.calculate(self.terminal_line);
+                            let n = match self.prompt_state.take() {
+                                PromptState::Number(n) => {
+                                    n
+                                }
+                                _ => {
+                                    1
+                                }
+                            };
+                            self.scroll_up(size.wrapping_mul(n));
                         },
-                        KeyBehavior::Down => match self.prompt_state.take() {
-                            PromptState::Number(n) => {
-                                self.scroll_down(n);
-                            }
-                            _ => {
-                                self.scroll_down(1);
-                            }
-                        },
-                        KeyBehavior::PageDown => match self.prompt_state.take() {
-                            PromptState::Number(n) => {
-                                self.scroll_down(self.terminal_line.saturating_mul(n));
-                            }
-                            _ => {
-                                self.scroll_down(self.terminal_line);
-                            }
-                        },
-                        KeyBehavior::PageUp => match self.prompt_state.take() {
-                            PromptState::Number(n) => {
-                                self.scroll_up(self.terminal_line.saturating_mul(n));
-                            }
-                            _ => {
-                                self.scroll_up(self.terminal_line);
-                            }
-                        },
-                        KeyBehavior::GotoTop => match self.prompt_state.take() {
-                            PromptState::Number(n) => {
-                                self.goto_scroll(n.saturating_sub(1));
-                            }
-                            _ => {
-                                self.scroll_up(usize::MAX);
-                            }
-                        },
-                        KeyBehavior::GotoEnd => match self.prompt_state.take() {
-                            PromptState::Number(n) => {
-                                self.goto_scroll(n.saturating_sub(1));
-                            }
-                            _ => {
-                                self.scroll_down(usize::MAX);
-                            }
+                        KeyBehavior::Down(size) => {
+                            let size = size.calculate(self.terminal_line);
+                            let n = match self.prompt_state.take() {
+                                PromptState::Number(n) => {
+                                    n
+                                }
+                                _ => {
+                                    1
+                                }
+                            };
+                            self.scroll_down(size.wrapping_mul(n));
                         },
                         KeyBehavior::Quit => {
                             return Ok(true);
