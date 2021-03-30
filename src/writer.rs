@@ -223,8 +223,8 @@ impl<'b> UiContext<'b> {
 
             if self.search_positions.is_empty() {
                 for line in self.lines[self.scroll..end].iter() {
+                    queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
                     self.output_buf.extend_from_slice(line);
-                    queue!(self.output_buf, Clear(ClearType::UntilNewLine))?;
                     self.output_buf.extend_from_slice(b"\r\n");
                 }
             } else {
@@ -232,6 +232,7 @@ impl<'b> UiContext<'b> {
                     .iter()
                     .zip(self.search_positions[self.scroll..end].iter())
                 {
+                    queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
                     let mut prev_pos = 0;
                     for pos in search.iter() {
                         self.output_buf
@@ -243,7 +244,6 @@ impl<'b> UiContext<'b> {
                         prev_pos = pos.end as usize;
                     }
                     self.output_buf.extend_from_slice(&line[prev_pos..]);
-                    queue!(self.output_buf, Clear(ClearType::UntilNewLine))?;
                     self.output_buf.extend_from_slice(b"\r\n");
                 }
             }
