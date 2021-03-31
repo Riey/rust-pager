@@ -245,7 +245,11 @@ impl<'b> UiContext<'b> {
             let end = self.scroll + real;
 
             for _ in 0..margin {
-                queue!(self.output_buf, Clear(ClearType::CurrentLine), MoveToNextLine(1))?;
+                queue!(
+                    self.output_buf,
+                    Clear(ClearType::CurrentLine),
+                    MoveToNextLine(1)
+                )?;
             }
 
             if self.search_positions.is_empty() {
@@ -695,7 +699,6 @@ impl SizeContext {
 
     pub fn calculate_real_size(&self, lines: &[RpLine]) -> (usize, usize) {
         let mut real = 0;
-        let mut margin = 0;
         let mut left = self.terminal_line;
         for line in lines.iter().rev() {
             let size = line_line_size(line, self.terminal_column);
@@ -705,9 +708,8 @@ impl SizeContext {
                     left = n;
                 }
                 None => {
-                    margin = left;
                     break;
-                },
+                }
             }
         }
         (real, left)
