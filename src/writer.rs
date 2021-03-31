@@ -180,7 +180,7 @@ pub struct UiContext<'b> {
     scroll: usize,
     terminal_line: usize,
     terminal_column: usize,
-    prev_wrap: usize,
+    prev_writed_line: usize,
     keymap: AHashMap<KeyEvent, KeyBehavior>,
     need_redraw: bool,
     prompt_outdated: bool,
@@ -215,7 +215,7 @@ impl<'b> UiContext<'b> {
             terminal_column: x as usize,
             keymap: default_keymap(),
             need_redraw: true,
-            prev_wrap: 0,
+            prev_writed_line: 0,
             prompt_state: PromptState::Normal,
             prompt_outdated: true,
             prompt: String::with_capacity(256),
@@ -224,7 +224,19 @@ impl<'b> UiContext<'b> {
     }
 
     fn max_scroll(&self) -> usize {
-        self.lines.len().saturating_sub(self.terminal_line)
+        let mut real = 0;
+        let mut left = self.terminal_line;
+        for line in self.lines.iter().rev() {
+            let size = line_line_size(line, self.terminal_column);
+            match left.checked_sub(size) {
+                Some(n) => {
+                    real += 1;
+                    left = n;
+                }
+                None => break,
+            }
+        }
+        self.lines.len().saturating_sub(real)
     }
 
     pub fn redraw(&mut self) -> Result<()> {
@@ -237,6 +249,7 @@ impl<'b> UiContext<'b> {
             queue!(self.output_buf, MoveTo(0, 0))?;
 
             let mut prev_wrap = 0;
+            let mut prev_writed_line = 0;
             let mut ch_writer = ChWriter::new(self.terminal_column);
             let end = (self.scroll + self.terminal_line).min(self.lines.len());
 
@@ -250,6 +263,7 @@ impl<'b> UiContext<'b> {
                     }
                     prev_wrap = ch_writer.wrap;
                     ch_writer.pos = 0;
+                    prev_writed_line += 1;
                     queue!(self.output_buf, MoveToNextLine(1))?;
                 }
             } else {
@@ -273,10 +287,12 @@ impl<'b> UiContext<'b> {
                     }
                     prev_wrap = ch_writer.wrap;
                     ch_writer.pos = 0;
+                    prev_writed_line += 1;
                     queue!(self.output_buf, MoveToNextLine(1))?;
                 }
             }
 
+            self.prev_writed_line = prev_writed_line;
             queue!(self.output_buf, SetAttribute(Attribute::Reset),)?;
             self.update_prompt();
             queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
@@ -331,7 +347,7 @@ impl<'b> UiContext<'b> {
                         "{}lines {}-{}/{}",
                         SetAttribute(Attribute::Reverse),
                         self.scroll + 1,
-                        (self.scroll + self.terminal_line).saturating_sub(self.prev_wrap).min(self.lines.len()),
+                        self.scroll + self.prev_writed_line,
                         self.lines.len(),
                     )
                     .ok();
@@ -407,12 +423,12 @@ impl<'b> UiContext<'b> {
             self.search_positions.clear();
         }
 
-        if needle.is_empty() {
-            return;
-        }
-
         let char_count = needle.chars().count();
         self.search_char_len = char_count;
+
+        if char_count == 0 {
+            return;
+        }
 
         #[cfg(feature = "logging")]
         log::debug!("Search: {:?}", needle);
@@ -681,7 +697,19 @@ impl ChWriter {
     }
 }
 
-// fn line_width(l: RpLine) -> usize {
-//     l.iter().map(|c| c.ch.width().unwrap_or(0)).sum::<usize>()
-// }
+fn line_line_size(l: RpLine, column: usize) -> usize {
+    let width = line_width(l);
 
+    let div = width / column;
+    let rem = width % column;
+
+    if rem == 0 {
+        div
+    } else {
+        div + 1
+    }
+}
+
+fn line_width(l: RpLine) -> usize {
+    l.iter().map(|c| c.ch.width().unwrap_or(0)).sum::<usize>()
+}

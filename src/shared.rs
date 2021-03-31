@@ -1,5 +1,7 @@
+use bumpalo::Bump;
+use crossbeam_queue::ArrayQueue;
 use crossterm::style::{Attribute, Attributes, Color};
-use std::convert::TryFrom;
+use std::{convert::TryFrom, sync::atomic::Ordering, time::Duration};
 use vte::Params;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -12,21 +14,39 @@ pub struct RpChar {
 
 pub type RpLine<'b> = &'b [RpChar];
 
-pub struct Buffer {
-    pub buf: Vec<RpChar>,
-    pub foreground: Color,
-    pub background: Color,
-    pub attribute: Attributes,
+pub struct Buffer<'b, 'c> {
+    bump: &'b Bump,
+    tx: &'c ArrayQueue<RpLine<'b>>,
+    buf: Vec<RpChar>,
+    foreground: Color,
+    background: Color,
+    attribute: Attributes,
 }
 
-impl Buffer {
-    pub fn new() -> Self {
+impl<'b, 'c> Buffer<'b, 'c> {
+    pub fn new(bump: &'b Bump, tx: &'c ArrayQueue<RpLine<'b>>) -> Self {
         Self {
+            bump,
+            tx,
             buf: Vec::with_capacity(64),
             foreground: Color::Reset,
             background: Color::Reset,
             attribute: Attributes::default(),
         }
+    }
+
+    pub fn flush(&mut self) {
+        let line = self.bump.alloc_slice_copy(&self.buf);
+
+        while self.tx.push(line).is_err() {
+            if !crate::RUN.load(Ordering::Acquire) {
+                return;
+            }
+
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        self.buf.clear();
     }
 
     // Copied from vt100
@@ -169,7 +189,7 @@ const fn idx_color(c: u8) -> Color {
     }
 }
 
-impl vte::Perform for Buffer {
+impl vte::Perform for Buffer<'_, '_> {
     fn print(&mut self, ch: char) {
         self.buf.push(RpChar {
             ch,
@@ -177,6 +197,24 @@ impl vte::Perform for Buffer {
             background: self.background,
             attribute: self.attribute,
         });
+    }
+
+    fn execute(&mut self, b: u8) {
+        match b {
+            // backspace
+            8 => {
+                self.buf.pop();
+            }
+            // tab
+            9 => {
+                self.print('\t');
+            }
+            // line break
+            10 | 11 | 12 => {
+                self.flush();
+            }
+            _ => {}
+        }
     }
 
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], _ignore: bool, action: char) {
