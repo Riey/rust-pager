@@ -178,8 +178,7 @@ pub struct UiContext<'b> {
     output: File,
     output_buf: Vec<u8>,
     scroll: usize,
-    terminal_line: usize,
-    terminal_column: usize,
+    size_ctx: SizeContext,
     prev_wrap: usize,
     keymap: AHashMap<KeyEvent, KeyBehavior>,
     need_redraw: bool,
@@ -202,7 +201,9 @@ impl<'b> UiContext<'b> {
             Hide
         )?;
 
+        let mut size_ctx = SizeContext::new();
         let (x, y) = crossterm::terminal::size()?;
+        size_ctx.resize(x as usize, y as usize - 1);
 
         Ok(Self {
             rx,
@@ -211,8 +212,7 @@ impl<'b> UiContext<'b> {
             output_buf: vec![0; OUTBUF_SIZE],
             search_positions: Vec::new(),
             search_char_len: 0,
-            terminal_line: y as usize - 1,
-            terminal_column: x as usize,
+            size_ctx,
             keymap: default_keymap(),
             need_redraw: true,
             prev_wrap: 0,
@@ -223,28 +223,10 @@ impl<'b> UiContext<'b> {
         })
     }
 
-    fn real_terminal_line(&self) -> usize {
-        let mut real = 0;
-        let mut left = self.terminal_line;
-        for line in self.lines.iter().rev() {
-            let size = line_line_size(line, self.terminal_column);
-            #[cfg(feature = "logging")]
-            log::debug!("{} - {}", left, size);
-            match left.checked_sub(size) {
-                Some(n) => {
-                    real += 1;
-                    left = n;
-                }
-                None => break,
-            }
-        }
-        #[cfg(feature = "logging")]
-        log::debug!("REAL: {}", real);
-        real
-    }
-
     fn max_scroll(&self) -> usize {
-        self.lines.len().saturating_sub(self.real_terminal_line())
+        self.lines
+            .len()
+            .saturating_sub(self.size_ctx.calculate_real_size(&self.lines).0)
     }
 
     pub fn redraw(&mut self) -> Result<()> {
@@ -256,19 +238,21 @@ impl<'b> UiContext<'b> {
 
             queue!(self.output_buf, MoveTo(0, 0))?;
 
-            let mut prev_wrap = 0;
-            let mut ch_writer = ChWriter::new(self.terminal_column);
-            let end = (self.scroll + self.terminal_line).min(self.lines.len());
+            let mut ch_writer = ChWriter::new(self.size_ctx.terminal_column());
+            let (real, margin) = self
+                .size_ctx
+                .calculate_real_size(&self.lines[self.scroll..]);
+            let end = self.scroll + real;
+
+            for _ in 0..margin {
+                queue!(self.output_buf, Clear(ClearType::CurrentLine), MoveToNextLine(1))?;
+            }
 
             if self.search_positions.is_empty() {
                 let mut iter = self.lines[self.scroll..end].iter();
                 while let Some(line) = iter.next() {
                     queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
                     ch_writer.write_slice(&mut self.output_buf, line)?;
-                    for _ in prev_wrap..ch_writer.wrap {
-                        iter.next_back();
-                    }
-                    prev_wrap = ch_writer.wrap;
                     ch_writer.pos = 0;
                     queue!(self.output_buf, MoveToNextLine(1))?;
                 }
@@ -288,16 +272,12 @@ impl<'b> UiContext<'b> {
                         prev_pos = end;
                     }
                     ch_writer.write_slice(&mut self.output_buf, &line[prev_pos..])?;
-                    for _ in prev_wrap..ch_writer.wrap {
-                        iter.next_back();
-                    }
-                    prev_wrap = ch_writer.wrap;
                     ch_writer.pos = 0;
                     queue!(self.output_buf, MoveToNextLine(1))?;
                 }
             }
 
-            self.prev_wrap = prev_wrap;
+            self.prev_wrap = ch_writer.wrap;
             queue!(self.output_buf, SetAttribute(Attribute::Reset),)?;
             self.update_prompt();
             queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
@@ -318,7 +298,7 @@ impl<'b> UiContext<'b> {
     fn redraw_prompt(&mut self) -> Result<()> {
         self.output_buf.clear();
 
-        let lines = self.terminal_line;
+        let lines = self.size_ctx.terminal_line();
         queue!(
             self.output_buf,
             MoveTo(0, lines as _),
@@ -333,7 +313,7 @@ impl<'b> UiContext<'b> {
     }
 
     pub fn push_line(&mut self, line: RpLine<'b>) {
-        if self.lines.len() < self.terminal_line {
+        if self.lines.len() < self.size_ctx.terminal_line() {
             self.need_redraw = true;
         }
         self.prompt_outdated = true;
@@ -352,7 +332,7 @@ impl<'b> UiContext<'b> {
                         "{}lines {}-{}/{}",
                         SetAttribute(Attribute::Reverse),
                         self.scroll + 1,
-                        (self.scroll + self.terminal_line - self.prev_wrap),
+                        (self.scroll + self.size_ctx.terminal_line() - self.prev_wrap),
                         self.lines.len(),
                     )
                     .ok();
@@ -541,7 +521,7 @@ impl<'b> UiContext<'b> {
                             }
                         },
                         KeyBehavior::Up(size) => {
-                            let size = size.calculate(self.terminal_line);
+                            let size = size.calculate(self.size_ctx.terminal_line());
                             let n = match self.prompt_state.take() {
                                 PromptState::Number(n) => n,
                                 _ => 1,
@@ -549,7 +529,7 @@ impl<'b> UiContext<'b> {
                             self.scroll_up(size.wrapping_mul(n));
                         }
                         KeyBehavior::Down(size) => {
-                            let size = size.calculate(self.terminal_line);
+                            let size = size.calculate(self.size_ctx.terminal_line());
                             let n = match self.prompt_state.take() {
                                 PromptState::Number(n) => n,
                                 _ => 1,
@@ -564,8 +544,7 @@ impl<'b> UiContext<'b> {
                 }
             }
             Event::Resize(x, y) => {
-                self.terminal_column = x as usize;
-                self.terminal_line = y as usize - 1;
+                self.size_ctx.resize(x as usize, y as usize - 1);
                 self.need_redraw = true;
                 self.prompt_outdated = true;
             }
@@ -694,11 +673,57 @@ impl ChWriter {
             self.wrap += 1;
             self.pos = width;
         } else {
-            write!(out, "{}", ch.ch)?;
             self.pos += width;
         }
 
+        write!(out, "{}", ch.ch)?;
+
         Ok(())
+    }
+}
+
+#[derive(Default, Clone)]
+struct SizeContext {
+    terminal_column: usize,
+    terminal_line: usize,
+}
+
+impl SizeContext {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn calculate_real_size(&self, lines: &[RpLine]) -> (usize, usize) {
+        let mut real = 0;
+        let mut margin = 0;
+        let mut left = self.terminal_line;
+        for line in lines.iter().rev() {
+            let size = line_line_size(line, self.terminal_column);
+            match left.checked_sub(size) {
+                Some(n) => {
+                    real += 1;
+                    left = n;
+                }
+                None => {
+                    margin = left;
+                    break;
+                },
+            }
+        }
+        (real, left)
+    }
+
+    pub fn resize(&mut self, terminal_column: usize, terminal_line: usize) {
+        self.terminal_column = terminal_column;
+        self.terminal_line = terminal_line;
+    }
+
+    pub fn terminal_column(&self) -> usize {
+        self.terminal_column
+    }
+
+    pub fn terminal_line(&self) -> usize {
+        self.terminal_line
     }
 }
 

@@ -215,7 +215,14 @@ impl vte::Perform for Buffer<'_, '_> {
             }
             // tab
             9 => {
-                self.print('\t');
+                self.print(' ');
+                self.print(' ');
+                self.print(' ');
+                self.print(' ');
+                self.print(' ');
+                self.print(' ');
+                self.print(' ');
+                self.print(' ');
             }
             // line break
             10 | 11 | 12 => {
