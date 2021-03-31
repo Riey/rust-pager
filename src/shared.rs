@@ -35,6 +35,14 @@ impl<'b, 'c> Buffer<'b, 'c> {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.buf.is_empty()
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.buf.len() >= 512
+    }
+
     pub fn flush(&mut self) {
         let line = self.bump.alloc_slice_copy(&self.buf);
 

@@ -6,7 +6,6 @@ use std::{
     fs::File,
     io::{ErrorKind, Read},
     sync::{atomic::Ordering, Arc},
-    time::Duration,
 };
 
 pub fn read_from_stdin<'b>(
@@ -19,7 +18,7 @@ pub fn read_from_stdin<'b>(
     let mut stdin_buf = [0; 8196];
 
     loop {
-        let mut buf = match stdin.read(&mut stdin_buf) {
+        let buf = match stdin.read(&mut stdin_buf) {
             Ok(l) => &stdin_buf[..l],
             Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
             Err(e) => return Err(From::from(e)),
@@ -31,6 +30,9 @@ pub fn read_from_stdin<'b>(
         if buf.is_empty() {
             #[cfg(feature = "logging")]
             log::info!("EOF");
+            if !buffer.is_empty() {
+                buffer.flush();
+            }
             break Ok(());
         }
 
@@ -39,5 +41,12 @@ pub fn read_from_stdin<'b>(
         }
 
         buf.iter().for_each(|b| parser.advance(&mut buffer, *b));
+
+        if buffer.is_full() {
+            #[cfg(feature = "logging")]
+            log::error!("Too long");
+            buffer.flush();
+            break Ok(());
+        }
     }
 }
