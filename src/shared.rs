@@ -2,6 +2,7 @@ use bumpalo::Bump;
 use crossbeam_queue::ArrayQueue;
 use crossterm::style::{Attribute, Attributes, Color};
 use std::{convert::TryFrom, sync::atomic::Ordering, time::Duration};
+use unicode_width::UnicodeWidthChar;
 use vte::Params;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -16,6 +17,7 @@ pub type RpLine<'b> = &'b [RpChar];
 
 pub struct Buffer<'b, 'c> {
     bump: &'b Bump,
+    cursor_column: usize,
     tx: &'c ArrayQueue<RpLine<'b>>,
     buf: Vec<RpChar>,
     foreground: Color,
@@ -28,6 +30,7 @@ impl<'b, 'c> Buffer<'b, 'c> {
         Self {
             bump,
             tx,
+            cursor_column: 0,
             buf: Vec::with_capacity(64),
             foreground: Color::Reset,
             background: Color::Reset,
@@ -54,6 +57,7 @@ impl<'b, 'c> Buffer<'b, 'c> {
             std::thread::sleep(Duration::from_millis(50));
         }
 
+        self.cursor_column = 0;
         self.buf.clear();
     }
 
@@ -199,6 +203,7 @@ const fn idx_color(c: u8) -> Color {
 
 impl vte::Perform for Buffer<'_, '_> {
     fn print(&mut self, ch: char) {
+        self.cursor_column += ch.width().unwrap_or(0);
         self.buf.push(RpChar {
             ch,
             foreground: self.foreground,
@@ -215,14 +220,9 @@ impl vte::Perform for Buffer<'_, '_> {
             }
             // tab
             9 => {
-                self.print(' ');
-                self.print(' ');
-                self.print(' ');
-                self.print(' ');
-                self.print(' ');
-                self.print(' ');
-                self.print(' ');
-                self.print(' ');
+                for _ in 0..calculate_next_tab(self.cursor_column) {
+                    self.print(' ');
+                }
             }
             // line break
             10 | 11 | 12 => {
@@ -242,5 +242,15 @@ impl vte::Perform for Buffer<'_, '_> {
             },
             _ => {}
         }
+    }
+}
+
+const fn calculate_next_tab(cursor: usize) -> usize {
+    const TAB_SIZE: usize = 8;
+    let rem = cursor % TAB_SIZE;
+    if rem == 0 {
+        TAB_SIZE
+    } else {
+        rem
     }
 }
