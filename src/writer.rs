@@ -732,7 +732,13 @@ impl SizeContext {
 fn line_line_size(l: RpLine, column: usize) -> usize {
     let width = line_width(l);
 
-    (width / column) + 1
+    if width == 0 {
+        1
+    } else if width % column == 0 {
+        width / column
+    } else {
+        (width / column) + 1
+    }
 }
 
 fn line_width(l: RpLine) -> usize {

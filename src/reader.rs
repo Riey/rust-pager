@@ -24,9 +24,6 @@ pub fn read_from_stdin<'b>(
             Err(e) => return Err(From::from(e)),
         };
 
-        #[cfg(feature = "logging")]
-        log::debug!("Read {} bytes", buf.len());
-
         if buf.is_empty() {
             #[cfg(feature = "logging")]
             log::info!("EOF");
