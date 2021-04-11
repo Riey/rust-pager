@@ -1,3 +1,5 @@
 /target
 rp.log
 .direnv
+result
+result-*
