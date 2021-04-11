@@ -64,7 +64,7 @@ pub enum ScrollSize {
 }
 
 impl ScrollSize {
-    pub const fn calculate(self, terminal_line: usize) -> usize {
+    pub fn calculate(self, terminal_line: usize) -> usize {
         match self {
             Self::One => 1,
             Self::HalfPage => terminal_line / 2,
@@ -244,6 +244,8 @@ impl<'b> UiContext<'b> {
                 .calculate_real_size(&self.lines[self.scroll..]);
             let end = self.scroll + real;
 
+            #[cfg(feature = "logging")]
+            log::debug!("margin: {}", margin);
             for _ in 0..margin {
                 queue!(
                     self.output_buf,
@@ -284,8 +286,7 @@ impl<'b> UiContext<'b> {
             self.prev_wrap = ch_writer.wrap;
             queue!(self.output_buf, SetAttribute(Attribute::Reset),)?;
             self.update_prompt();
-            queue!(self.output_buf, Clear(ClearType::CurrentLine))?;
-            self.output_buf.extend_from_slice(self.prompt.as_bytes());
+            self.write_prompt()?;
             #[cfg(feature = "logging")]
             log::trace!("Write {} bytes", self.output_buf.len());
             self.output.write(&self.output_buf)?;
@@ -299,9 +300,7 @@ impl<'b> UiContext<'b> {
         Ok(())
     }
 
-    fn redraw_prompt(&mut self) -> Result<()> {
-        self.output_buf.clear();
-
+    fn write_prompt(&mut self) -> Result<()> {
         let lines = self.size_ctx.terminal_line();
         queue!(
             self.output_buf,
@@ -309,7 +308,12 @@ impl<'b> UiContext<'b> {
             Clear(ClearType::CurrentLine)
         )?;
         self.output_buf.extend_from_slice(self.prompt.as_bytes());
+        Ok(())
+    }
 
+    fn redraw_prompt(&mut self) -> Result<()> {
+        self.output_buf.clear();
+        self.write_prompt()?;
         self.output.write_all(&self.output_buf)?;
         self.output.flush()?;
 

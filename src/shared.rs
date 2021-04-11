@@ -178,7 +178,7 @@ impl<'b, 'c> Buffer<'b, 'c> {
     }
 }
 
-const fn idx_color(c: u8) -> Color {
+fn idx_color(c: u8) -> Color {
     use Color::*;
     match c {
         0 => Black,
@@ -245,7 +245,7 @@ impl vte::Perform for Buffer<'_, '_> {
     }
 }
 
-const fn calculate_next_tab(cursor: usize) -> usize {
+fn calculate_next_tab(cursor: usize) -> usize {
     const TAB_SIZE: usize = 8;
     let rem = cursor % TAB_SIZE;
     if rem == 0 {
